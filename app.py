@@ -20,8 +20,14 @@ TRAIN_STATUS_FILE = os.path.join(APP_DIR, "train_status.json")
 
 # --- Camera & System Configuration ---
 COOLDOWN_SECONDS = 60  # Time in seconds before the same student can be marked again
-CCTV_URL = 0           # Use integer 0 for the default webcam index
+CCTV_URL = 0           # Default: webcam index 0 (can be int index, file path, or RTSP URL)
+current_source = 0     # Active source used by the monitoring thread
+current_source_type = 'webcam'  # webcam | video | cctv
 cctv_running = False   # Global flag to control the monitoring thread
+cctv_stop_reason = ''  # Last stop reason/message
+UPLOADS_DIR = os.path.join(APP_DIR, "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+ALLOWED_VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.m4v', '.wmv'}
 # ------------------------------------
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -179,55 +185,133 @@ def process_frame_for_attendance(frame):
         print(f"Error processing frame: {e}")
 
 def cctv_processing_thread_target():
-    """The main loop for the background thread that captures and processes webcam frames."""
-    global cctv_running
-    cap = cv2.VideoCapture(CCTV_URL)
+    """The main loop for the background thread that captures and processes frames."""
+    global cctv_running, cctv_stop_reason, current_source, current_source_type
+    source = current_source
+    source_type = current_source_type
+    cap = cv2.VideoCapture(source)
     if not cap.isOpened():
-        print(f"ERROR: Cannot open video stream: {CCTV_URL}.")
+        msg = f"Cannot open source: {source}."
+        print(f"ERROR: {msg}")
+        cctv_stop_reason = msg
         cctv_running = False
         return
     frame_skip = 10
     frame_count = 0
-    print(f"Webcam Processing started. Reading every {frame_skip}th frame.")
+    cctv_stop_reason = ""
+    print(f"Processing started ({source_type}). Reading every {frame_skip}th frame. Source={source}")
     while cctv_running:
         ret, frame = cap.read()
         if not ret:
-            print("Webcam stream failed. Stopping thread.")
+            if source_type == 'video':
+                cctv_stop_reason = "Video processing completed."
+                print(cctv_stop_reason)
+            else:
+                cctv_stop_reason = "Stream ended or cannot read frames."
+                print(f"Source read failed. Stopping thread. ({source})")
             break
         frame_count += 1
         if frame_count % frame_skip == 0:
+            try:
+                h, w = frame.shape[:2]
+                if w > 640:
+                    scale = 640 / float(w)
+                    frame = cv2.resize(frame, (640, int(h * scale)))
+            except Exception:
+                pass
             process_frame_for_attendance(frame)
             frame_count = 0
     cap.release()
-    print("Webcam Processing stopped.")
-    cctv_running = False
+    if cctv_running:
+        cctv_running = False
+    if not cctv_stop_reason:
+        cctv_stop_reason = "Monitoring stopped."
+    print("Processing stopped.")
 
 # ==============================================================================
 # ADMIN-ONLY API & CONTROL ROUTES
 # ==============================================================================
+@app.route("/upload_video", methods=["POST"])
+@admin_required
+def upload_video():
+    """Upload a recorded video file to be processed for attendance."""
+    if "video" not in request.files:
+        return jsonify({"status": "error", "message": "No video file provided."}), 400
+    file = request.files["video"]
+    if not file or not file.filename:
+        return jsonify({"status": "error", "message": "No file selected."}), 400
+    from werkzeug.utils import secure_filename
+    filename = secure_filename(file.filename)
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_VIDEO_EXTENSIONS:
+        return jsonify({"status": "error", "message": f"Unsupported format. Allowed: {', '.join(sorted(ALLOWED_VIDEO_EXTENSIONS))}"}), 400
+    save_name = f"{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{filename}"
+    save_path = os.path.join(UPLOADS_DIR, save_name)
+    try:
+        file.save(save_path)
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Failed to save video: {e}"}), 500
+    return jsonify({"status": "ok", "filename": save_name, "path": save_path})
+
+
 @app.route("/cctv_control", methods=["POST"])
 @admin_required
 def cctv_control():
-    """API for Admins to start/stop the live monitoring thread."""
-    global cctv_running
-    action = request.get_json().get('action')
+    """API for Admins to start/stop monitoring (webcam, uploaded video, or CCTV/RTSP)."""
+    global cctv_running, current_source, current_source_type, cctv_stop_reason
+    data = request.get_json(silent=True) or {}
+    action = data.get('action')
     if action == 'start' and not cctv_running:
-        if load_model_if_exists() is None:
-            return jsonify({"status": "error", "message": "Model not trained. Please train the model first."}), 400
+        try:
+            if load_model_if_exists() is None:
+                return jsonify({"status": "error", "message": "Model not trained. Please train the model first."}), 400
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"Model check failed: {e}"}), 500
+        source_type = (data.get('source_type') or 'webcam').lower()
+        source = data.get('source', 0)
+        if source_type == 'webcam':
+            try:
+                source = int(source)
+            except Exception:
+                source = 0
+        elif source_type == 'video':
+            source = str(source)
+            if not os.path.isabs(source):
+                source = os.path.join(UPLOADS_DIR, source)
+            if not os.path.exists(source):
+                return jsonify({"status": "error", "message": "Video file not found. Upload a video first."}), 400
+        elif source_type == 'cctv':
+            source = str(source).strip()
+            if not source:
+                return jsonify({"status": "error", "message": "CCTV/RTSP URL is required."}), 400
+        else:
+            return jsonify({"status": "error", "message": "Invalid source_type."}), 400
+        current_source = source
+        current_source_type = source_type
+        cctv_stop_reason = ""
         cctv_running = True
         threading.Thread(target=cctv_processing_thread_target, daemon=True).start()
-        return jsonify({"status": "started"})
+        return jsonify({"status": "started", "source_type": source_type})
     elif action == 'stop' and cctv_running:
         cctv_running = False
+        cctv_stop_reason = "Stopped by admin."
         return jsonify({"status": "stopping"})
-    return jsonify({"status": "already_running" if cctv_running else "stopped"})
+    return jsonify({"status": "already_running" if cctv_running else "stopped", "message": cctv_stop_reason})
+
 
 @app.route("/cctv_status", methods=["GET"])
 @admin_required
 def cctv_status():
     """API for Admins to poll the status of the monitoring thread."""
-    global cctv_running
-    return jsonify({"running": cctv_running, "camera_url": str(CCTV_URL)})
+    global cctv_running, current_source, current_source_type, cctv_stop_reason
+    display_source = os.path.basename(str(current_source)) if current_source_type == 'video' else str(current_source)
+    return jsonify({
+        "running": cctv_running,
+        "camera_url": str(current_source),
+        "source_type": current_source_type,
+        "source": display_source,
+        "message": cctv_stop_reason
+    })
     
 @app.route("/train_model", methods=["GET"])
 @admin_required
