@@ -1,54 +1,80 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Staff Monitor</title>
+  <title>Staff Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-
-<div class="right-panel">
-  <div class="card p-4 shadow-sm glass-card">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h4>Live Attendance Monitor</h4>
-      <div>
-        {% if session.get('role') == 'admin' %}
-        <a class="btn btn-outline-secondary btn-sm me-2" href="/">Admin Dashboard</a>
-        {% endif %}
+<div class="main-container">
+  <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-4">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="/staff_monitor">Staff Dashboard</a>
+      <div class="d-flex gap-2">
+        {% if session.get('role') == 'admin' %}<a class="btn btn-outline-light btn-sm" href="/">Admin</a>{% endif %}
+        <a class="btn btn-outline-light btn-sm" href="/mark_attendance">Mark Attendance</a>
+        <a class="btn btn-outline-light btn-sm" href="/attendance_record">Records</a>
         <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
       </div>
     </div>
+  </nav>
 
-    <div id="monitorStatus" class="alert alert-info small">
-        <p class="mb-0">You are viewing the live attendance feed. All student entries and exits will appear below in real-time.</p>
-        <p class="mb-0 mt-2">System status is controlled by the Administrator.</p>
+  <div class="container">
+    <div class="row g-4">
+      <div class="col-lg-5">
+        <div class="card p-3 shadow-sm glass-card mb-3">
+          <h5>Attendance Source (common)</h5>
+          <p class="small text-muted mb-2">No CCTV setup now — use laptop camera or an uploaded recorded video.</p>
+          <div class="mb-2"><label class="form-label small mb-1">Source</label>
+            <select id="sourceType" class="form-select form-select-sm"><option value="webcam">Laptop Camera</option><option value="video">Uploaded Video</option><option value="cctv" disabled>CCTV/RTSP (later)</option></select>
+          </div>
+          <div id="webcamSourceWrap" class="mb-2"><label class="form-label small mb-1">Camera Index</label><input id="cameraIndex" type="number" min="0" value="0" class="form-control form-control-sm"></div>
+          <div id="videoSourceWrap" class="mb-2" style="display:none;">
+            <label class="form-label small mb-1">Upload Video</label>
+            <input id="videoFile" type="file" accept="video/*" class="form-control form-control-sm mb-2">
+            <button id="uploadVideoBtn" type="button" class="btn btn-sm btn-outline-primary w-100">Upload Video</button>
+            <div id="uploadStatus" class="small text-muted mt-1"></div>
+            <input id="uploadedVideoName" type="hidden" value="">
+          </div>
+          <div class="d-flex gap-2 mt-2">
+            <button id="startMonitorBtn" type="button" class="btn btn-success btn-sm flex-fill">Start</button>
+            <button id="stopMonitorBtn" type="button" class="btn btn-danger btn-sm flex-fill" disabled>Stop</button>
+          </div>
+          <div id="monitorStatus" class="alert alert-secondary mt-2 mb-0 small py-2">Monitoring idle.</div>
+        </div>
+
+        <div class="card p-3 shadow-sm glass-card">
+          <h5>Staff Options</h5>
+          <div class="d-grid gap-2">
+            <a class="btn btn-outline-primary btn-sm" href="/attendance_record?period=daily">Today’s Entry/Exit Report</a>
+            <a class="btn btn-outline-secondary btn-sm" href="/attendance_record">All Records & CSV</a>
+          </div>
+          <hr class="my-3">
+          <h6 class="mb-2">Sign Out by Face</h6>
+          <div class="text-center">
+            <video id="signOutVideo" width="280" height="210" autoplay muted style="border-radius:8px; border:2px solid #eee; background:#f8f9fa; display:none;"></video>
+            <div id="signOutStatus" class="alert alert-secondary mt-2 small mb-2">Click to record your exit.</div>
+          </div>
+          <button id="signOutBtn" class="btn btn-warning w-100 btn-sm">Sign Out with My Face</button>
+        </div>
+      </div>
+
+      <div class="col-lg-7">
+        <div class="card p-3 shadow-sm glass-card">
+          <h5 class="mb-3">Real-Time Attendance List</h5>
+          <ul id="notificationList" class="list-group" style="max-height: 520px; overflow-y: auto;">
+            <li class="list-group-item text-muted">Connecting to the live feed...</li>
+          </ul>
+        </div>
+      </div>
     </div>
-
-    <hr>
-
-    <h5 class="mb-3">Real-Time Activity Log</h5>
-    <ul id="notificationList" class="list-group" style="max-height: 400px; overflow-y: auto;">
-        <li class="list-group-item text-muted">Connecting to the live feed...</li>
-    </ul>
-
-    <hr class="mt-4">
-
-    <h5 class="mb-3">Personal Sign Out</h5>
-    <p class="small text-muted">Use this if you need to manually log your own exit.</p>
-    <div class="text-center">
-        <video id="signOutVideo" width="320" height="240" autoplay muted style="border-radius:8px; border:2px solid #eee; background:#f8f9fa;"></video>
-        <div id="signOutStatus" class="alert alert-secondary mt-2 small">Ready to Sign Out.</div>
-    </div>
-    <button id="signOutBtn" class="btn btn-warning w-100 mt-3">Sign Out with My Face</button>
-
   </div>
 </div>
-
-<!-- Link to new staff-specific JS and the signout JS -->
+<script src="{{ url_for('static', filename='js/admin_dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='js/staff_monitor.js') }}"></script>
 <script src="{{ url_for('static', filename='js/camera_signout.js') }}"></script>
-
 </body>
 </html>
+
 

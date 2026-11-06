@@ -2,33 +2,46 @@
 
 document.addEventListener("DOMContentLoaded", () => {
     const personalList = document.getElementById("personalNotificationList");
+    const errBox = document.getElementById("studentError");
+    const daysPresent = document.getElementById("daysPresent");
+    const totalMarks = document.getElementById("totalMarks");
+    const lastOut = document.getElementById("lastOut");
+
+    async function updateSummary() {
+        try {
+            const res = await fetch("/student_summary");
+            const data = await res.json().catch(()=>({}));
+            if (!res.ok || !data.ok) return;
+            if (daysPresent) daysPresent.textContent = data.days_present ?? 0;
+            if (totalMarks) totalMarks.textContent = data.total_attendance_marks ?? 0;
+            if (lastOut) lastOut.textContent = data.last_out || '-';
+        } catch (e) {}
+    }
 
     async function updatePersonalNotifications() {
+        if (!personalList) return;
         try {
             const res = await fetch("/student_notifications");
-            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-            const data = await res.json();
-
+            const data = await res.json().catch(()=>({}));
+            if (!res.ok) {
+                if (errBox) { errBox.classList.remove('d-none'); errBox.textContent = data.error || 'Could not load your records.'; }
+                personalList.innerHTML = '<li class="list-group-item text-muted small">No linked activity.</li>';
+                return;
+            }
+            if (errBox) errBox.classList.add('d-none');
             personalList.innerHTML = '';
-
             if (!data.notifications || data.notifications.length === 0) {
                 personalList.innerHTML = '<li class="list-group-item text-muted small">No recent activity recorded for you.</li>';
                 return;
             }
-
             data.notifications.forEach(n => {
                 const li = document.createElement('li');
                 const actionText = n.action === 'IN' ? 'Entered' : 'Exited';
-                const bgColor = n.action === 'IN' ? 'list-group-item-success-light' : 'list-group-item-info-light';
-                const textColor = n.action === 'IN' ? 'text-success-emphasis' : 'text-info-emphasis';
-                const borderColor = n.action === 'IN' ? 'border-success-subtle' : 'border-info-subtle';
-
-                li.className = `list-group-item small d-flex justify-content-between align-items-center ${bgColor} ${borderColor}`;
-                li.style.borderLeftWidth = '4px';
-
-                li.innerHTML = `
-                    <span>You <strong class="${textColor}">${actionText}</strong> at ${n.timestamp.split(' ')[1]}</span>
-                    <span class="badge bg-secondary rounded-pill">${n.timestamp.split(' ')[0]}</span>`;
+                const badge = n.action === 'IN' ? 'bg-success' : 'bg-secondary';
+                li.className = 'list-group-item small d-flex justify-content-between align-items-center';
+                const time = (n.timestamp || '').split(' ')[1] || '';
+                const date = (n.timestamp || '').split(' ')[0] || '';
+                li.innerHTML = `<span><span class="badge ${badge} me-2">${actionText}</span>${time}</span><span class="text-muted">${date}</span>`;
                 personalList.appendChild(li);
             });
         } catch (err) {
@@ -37,6 +50,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    updateSummary();
     updatePersonalNotifications();
-    setInterval(updatePersonalNotifications, 10000); // Poll every 10 seconds
+    setInterval(updatePersonalNotifications, 10000);
+    setInterval(updateSummary, 30000);
 });
