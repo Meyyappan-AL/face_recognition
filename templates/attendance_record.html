@@ -45,12 +45,12 @@
         <a href="/attendance_record?period=monthly" class="btn btn-sm {% if period == 'monthly' %}btn-dark{% else %}btn-light{% endif %}">Last 30 Days</a>
         <a href="/attendance_record?period=all" class="btn btn-sm {% if period == 'all' %}btn-dark{% else %}btn-light{% endif %}">All Time</a>
       </div>
-      <div class="small text-muted mb-2">Computed from IN/OUT notifications in the selected period. OUT can be recorded via “Sign Out with My Face” (staff/student) or future exit camera.</div>
+      <div class="small text-muted mb-2">Computed from IN/OUT notifications in the selected period (manual Present/Absent overrides applied for daily view). OUT can be recorded via "Sign Out with My Face" or future exit camera.</div>
 
       <div class="table-responsive">
         <table class="table table-striped table-hover align-middle">
           <thead class="table-dark">
-            <tr><th>ID</th><th>Name</th><th>Roll/Class</th><th>Status</th><th>First IN (UTC)</th><th>Last OUT (UTC)</th><th>Duration</th></tr>
+            <tr><th>ID</th><th>Name</th><th>Roll/Class</th><th>Status</th><th>First IN (UTC)</th><th>Last OUT (UTC)</th><th>Duration</th><th>Note</th></tr>
           </thead>
           <tbody>
           {% for r in report_rows or [] %}
@@ -61,14 +61,16 @@
               <td>
                 {% if r.status == 'Absent' %}<span class="badge bg-danger">Absent</span>
                 {% elif r.status == 'Exited' %}<span class="badge bg-secondary">Exited</span>
+                {% elif 'Manual' in (r.status or '') %}<span class="badge bg-warning text-dark">{{ r.status }}</span>
                 {% else %}<span class="badge bg-success">Present</span>{% endif %}
               </td>
               <td>{{ r.first_in_fmt or '-' }}</td>
               <td>{{ r.last_out_fmt or '-' }}</td>
               <td>{{ r.duration or '-' }}</td>
+              <td class="small text-muted">{{ r.manual or '' }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="7" class="text-center text-muted">No students found. Add students first.</td></tr>
+            <tr><td colspan="8" class="text-center text-muted">No students found. Add students first.</td></tr>
           {% endfor %}
           </tbody>
         </table>

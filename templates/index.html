@@ -84,42 +84,25 @@
       <div class="row g-4">
         <div class="col-lg-4">
           <div class="card p-3 shadow-sm glass-card mb-4">
-            <h5>Quick Actions</h5>
-            <p class="small text-muted">Create student entries, capture faces, or view records.</p>
+            <h5>Admin Controls</h5>
+            <p class="small text-muted">Manage students and training. Use the common Mark Attendance page for camera/video marking (no CCTV now).</p>
             <div class="d-grid gap-2">
               <a class="btn btn-primary" href="/add_student">Add Student</a>
               <a class="btn btn-outline-success" href="/admin/students">View Students</a>
-              <a class="btn btn-outline-secondary" href="/attendance_record">Records</a>
+              <a class="btn btn-outline-warning" href="/mark_attendance">Open Mark Attendance</a>
+              <a class="btn btn-outline-secondary" href="/attendance_record">Records / Entry-Exit</a>
             </div>
           </div>
 
           <div class="card p-3 shadow-sm glass-card">
-            <h5>Mark Attendance</h5>
-            <p class="small text-muted">Use laptop camera or an uploaded recorded video (CCTV/RTSP can be added later).</p>
-            <div class="mb-2">
-              <label class="form-label small mb-1">Source</label>
-              <select id="sourceType" class="form-select form-select-sm">
-                <option value="webcam">Laptop Camera</option>
-                <option value="video">Uploaded Video</option>
-                <option value="cctv" disabled>CCTV/RTSP (later)</option>
-              </select>
-            </div>
-            <div id="webcamSourceWrap" class="mb-2">
-              <label class="form-label small mb-1">Camera Index</label>
-              <input id="cameraIndex" type="number" min="0" value="0" class="form-control form-control-sm">
-            </div>
-            <div id="videoSourceWrap" class="mb-2" style="display:none;">
-              <label class="form-label small mb-1">Upload Video</label>
-              <input id="videoFile" type="file" accept="video/*" class="form-control form-control-sm mb-2">
-              <button id="uploadVideoBtn" type="button" class="btn btn-sm btn-outline-primary w-100">Upload Video</button>
-              <div id="uploadStatus" class="small text-muted mt-1"></div>
-              <input id="uploadedVideoName" type="hidden" value="">
-            </div>
-            <div class="d-flex gap-2 mt-2">
-              <button id="startMonitorBtn" type="button" class="btn btn-success btn-sm flex-fill">Start</button>
-              <button id="stopMonitorBtn" type="button" class="btn btn-danger btn-sm flex-fill" disabled>Stop</button>
-            </div>
-            <div id="monitorStatus" class="alert alert-secondary mt-2 mb-0 small py-2">Monitoring idle.</div>
+            <h5>Manual Attendance</h5>
+            <p class="small text-muted mb-2">Admin/staff can mark any student Present or Absent for a day.</p>
+            <select id="manualStudent" class="form-select form-select-sm mb-2"><option value="">Loading students...</option></select>
+            <input id="manualDate" type="date" class="form-control form-control-sm mb-2">
+            <select id="manualStatus" class="form-select form-select-sm mb-2"><option value="Present">Present</option><option value="Absent">Absent</option></select>
+            <input id="manualNote" type="text" class="form-control form-control-sm mb-2" placeholder="Note (optional)">
+            <button id="manualSubmitBtn" type="button" class="btn btn-sm btn-primary w-100">Save Manual Attendance</button>
+            <div id="manualMsg" class="small mt-2"></div>
           </div>
         </div>
 
