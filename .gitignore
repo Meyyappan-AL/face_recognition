@@ -1,0 +1,11 @@
+﻿__pycache__/
+*.pyc
+attendance.db
+*.db
+model.pkl
+train_status.json
+dataset/
+uploads/
+.env
+.venv/
+venv/

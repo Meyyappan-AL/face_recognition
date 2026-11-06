@@ -1,12 +1,12 @@
-import os
+﻿import os
 import io
 import threading
 import sqlite3
 import datetime
 import json
 from functools import wraps
-from flask import Flask, render_template, request, jsonify, send_file, abort, redirect, url_for, session
-from model import train_model_background, extract_embedding_for_image, MODEL_PATH
+from flask import Flask, render_template, request, jsonify, send_file, abort, redirect, url_for, session, Response
+from model import train_model_background, extract_embedding_for_image, load_model_if_exists, MODEL_PATH
 import hashlib
 import cv2
 
@@ -151,25 +151,41 @@ if not os.path.exists(TRAIN_STATUS_FILE):
 # ==============================================================================
 # REAL-TIME ATTENDANCE PROCESSING THREAD
 # ==============================================================================
+# Debug counters (reset conceptually per process; used for visibility)
+_attendance_debug = {"frames": 0, "no_face": 0, "no_model": 0, "low_conf": 0, "cooldown": 0, "marked": 0, "last": ""}
+
 def process_frame_for_attendance(frame):
     """Processes a single video frame to detect and recognize a student."""
-    from model import load_model_if_exists, predict_with_model
+    global _attendance_debug
     try:
+        _attendance_debug["frames"] += 1
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret: return
         stream = io.BytesIO(buffer.tobytes())
         emb = extract_embedding_for_image(stream)
-        if emb is None: return
+        if emb is None:
+            _attendance_debug["no_face"] += 1
+            if _attendance_debug["frames"] % 50 == 0:
+                print(f"[Attendance] scanned={_attendance_debug['frames']} no_face={_attendance_debug['no_face']} low_conf={_attendance_debug['low_conf']} marked={_attendance_debug['marked']} last={_attendance_debug['last']}")
+            return
         clf = load_model_if_exists()
-        if clf is None: return
+        if clf is None:
+            _attendance_debug["no_model"] += 1
+            return
         pred_label, conf = predict_with_model(clf, emb)
-        if conf < 0.7: return  # Increased confidence threshold for better accuracy
+        _attendance_debug["last"] = f"id={pred_label} conf={conf:.2f}"
+        if conf < 0.7:
+            _attendance_debug["low_conf"] += 1
+            if _attendance_debug["frames"] % 20 == 0:
+                print(f"[Attendance] low confidence: {_attendance_debug['last']} (need >= 0.70)")
+            return
         student_id = int(pred_label)
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         cutoff_time = datetime.datetime.utcnow() - datetime.timedelta(seconds=COOLDOWN_SECONDS)
         c.execute("SELECT id FROM attendance WHERE student_id=? AND timestamp >= ?", (student_id, cutoff_time.isoformat()))
         if c.fetchone():
+            _attendance_debug["cooldown"] += 1
             conn.close()
             return
         c.execute("SELECT name FROM students WHERE id=?", (student_id,))
@@ -180,6 +196,7 @@ def process_frame_for_attendance(frame):
         c.execute("INSERT INTO notifications (student_id, student_name, action, timestamp) VALUES (?, ?, ?, ?)", (student_id, name, 'IN', ts))
         conn.commit()
         conn.close()
+        _attendance_debug["marked"] += 1
         print(f"ATTENDANCE MARKED: {name} (ID: {student_id}, Conf: {conf:.2f})")
     except Exception as e:
         print(f"Error processing frame: {e}")
@@ -317,7 +334,8 @@ def cctv_status():
 @admin_required
 def train_model_route():
     status = read_train_status()
-    if status.get("running"): return jsonify({"status":"already_running"}), 202
+    if status.get("running") and status.get("progress", 0) < 100:
+        return jsonify({"status":"already_running"}), 202
     write_train_status({"running": True, "progress": 0, "message": "Starting training"})
     threading.Thread(target=train_model_background, args=(DATASET_DIR, lambda p,m: write_train_status({"running": True, "progress": p, "message": m})), daemon=True).start()
     return jsonify({"status":"started"}), 202
@@ -353,6 +371,41 @@ def delete_student(sid):
         import shutil
         shutil.rmtree(folder, ignore_errors=True)
     return jsonify({"deleted": True})
+
+
+@app.route("/admin/students")
+@admin_required
+def admin_students_page():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, name, roll, class, section, reg_no, created_at FROM students ORDER BY id DESC")
+    rows = c.fetchall()
+    conn.close()
+    students = []
+    for r in rows:
+        folder = os.path.join(DATASET_DIR, str(r[0]))
+        img_count = 0
+        if os.path.isdir(folder):
+            img_count = len([f for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))])
+        students.append({"id": r[0], "name": r[1], "roll": r[2], "class": r[3], "section": r[4], "reg_no": r[5], "created_at": r[6], "image_count": img_count})
+    return render_template("students_list.html", students=students)
+
+
+@app.route("/student_photo/<int:sid>")
+@admin_required
+def student_photo(sid):
+    folder = os.path.join(DATASET_DIR, str(sid))
+    if not os.path.isdir(folder):
+        abort(404)
+    files = [f for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+    if not files:
+        abort(404)
+    files.sort()
+    path = os.path.join(folder, files[-1])  # latest by name
+    try:
+        return send_file(path, mimetype="image/jpeg")
+    except Exception:
+        abort(404)
 
 # ==============================================================================
 # STAFF & ADMIN API ROUTES
@@ -507,41 +560,118 @@ def upload_face():
             app.logger.error("Save error: %s", e)
     return jsonify({"saved": saved})
 
+def _period_where(period, ts_col="timestamp"):
+    if period == "daily":
+        return f" WHERE date({ts_col}) = date('now')"
+    if period == "weekly":
+        return f" WHERE date({ts_col}) >= date('now', '-7 days')"
+    if period == "monthly":
+        return f" WHERE date({ts_col}) >= date('now', '-30 days')"
+    return ""
+
+
+def _entry_exit_rows(period):
+    """Compute first IN / last OUT per student from notifications in the selected period."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, name, roll, class, section, reg_no FROM students ORDER BY name")
+    students = c.fetchall()
+    where = _period_where(period)
+    c.execute(
+        "SELECT student_id, student_name, action, timestamp FROM notifications" + where + " ORDER BY timestamp ASC"
+    )
+    events = c.fetchall()
+    conn.close()
+
+    by_id = {}
+    for sid, sname, roll, cls, sec, reg in students:
+        by_id[sid] = {
+            "id": sid, "name": sname, "roll": roll or "", "class": cls or "", "section": sec or "",
+            "reg_no": reg or "", "first_in": None, "last_out": None, "status": "Absent"
+        }
+    for sid, sname, action, ts in events:
+        try:
+            sid_i = int(sid) if sid is not None else None
+        except Exception:
+            sid_i = None
+        if sid_i is None or sid_i not in by_id:
+            # handle legacy rows where student_id may not map cleanly
+            key = None
+            for k, v in by_id.items():
+                if v["name"] == sname:
+                    key = k; break
+            if key is None:
+                continue
+            sid_i = key
+        rec = by_id[sid_i]
+        if action == "IN":
+            if rec["first_in"] is None or ts < rec["first_in"]:
+                rec["first_in"] = ts
+            rec["status"] = "Present"
+        elif action == "OUT":
+            if rec["last_out"] is None or ts > rec["last_out"]:
+                rec["last_out"] = ts
+            if rec["first_in"] is not None:
+                rec["status"] = "Exited" if rec["last_out"] >= rec["first_in"] else "Present"
+
+    rows = []
+    for rec in by_id.values():
+        duration = ""
+        if rec["first_in"] and rec["last_out"]:
+            try:
+                t1 = datetime.datetime.fromisoformat(rec["first_in"])
+                t2 = datetime.datetime.fromisoformat(rec["last_out"])
+                if t2 >= t1:
+                    mins = int((t2 - t1).total_seconds() // 60)
+                    duration = f"{mins // 60}h {mins % 60}m"
+            except Exception:
+                duration = ""
+        def fmt(ts):
+            if not ts: return ""
+            try: return datetime.datetime.fromisoformat(ts).strftime('%Y-%m-%d %H:%M:%S')
+            except Exception: return ts
+        rows.append({**rec, "first_in_fmt": fmt(rec["first_in"]), "last_out_fmt": fmt(rec["last_out"]), "duration": duration})
+
+    # summary
+    present = sum(1 for r in rows if r["status"] != "Absent")
+    absent = sum(1 for r in rows if r["status"] == "Absent")
+    return rows, {"total": len(rows), "present": present, "absent": absent}
+
+
 @app.route("/attendance_record", methods=["GET"])
 @staff_or_admin_required
 def attendance_record():
     period = request.args.get("period", "all")
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    q = "SELECT id, student_id, name, timestamp FROM attendance"
-    params = ()
-    if period == "daily":
-        q += " WHERE date(timestamp) = date('now')"
-    elif period == "weekly":
-        q += " WHERE date(timestamp) >= date('now', '-7 days')"
-    elif period == "monthly":
-        q += " WHERE date(timestamp) >= date('now', '-30 days')"
-    q += " ORDER BY timestamp DESC LIMIT 5000"
-    c.execute(q, params)
-    rows = c.fetchall()
-    conn.close()
-    return render_template("attendance_record.html", records=rows, period=period)
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT id, student_id, name, timestamp FROM attendance" + _period_where(period) + " ORDER BY timestamp DESC LIMIT 5000")
+    records = c.fetchall(); conn.close()
+    report_rows, summary = _entry_exit_rows(period)
+    return render_template("attendance_record.html", records=records, period=period, report_rows=report_rows, summary=summary)
 
 @app.route("/download_csv", methods=["GET"])
 @staff_or_admin_required
 def download_csv():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT student_id, name, timestamp FROM attendance ORDER BY timestamp DESC")
-    rows = c.fetchall()
-    conn.close()
+    period = request.args.get("period", "all")
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT student_id, name, timestamp FROM attendance" + _period_where(period) + " ORDER BY timestamp DESC")
+    rows = c.fetchall(); conn.close()
+    output = io.StringIO(); output.write("Student ID,Name,Timestamp (UTC)\n")
+    for r in rows: output.write(f'"{r[0]}","{r[1]}","{r[2]}"\n')
+    mem = io.BytesIO(output.getvalue().encode("utf-8")); mem.seek(0)
+    return send_file(mem, as_attachment=True, download_name=f"attendance_{period}.csv", mimetype="text/csv")
+
+@app.route("/download_entry_exit_csv", methods=["GET"])
+@staff_or_admin_required
+def download_entry_exit_csv():
+    period = request.args.get("period", "daily")
+    rows, _ = _entry_exit_rows(period)
     output = io.StringIO()
-    output.write("Student ID,Name,Timestamp (UTC)\n")
+    output.write("Student ID,Name,Roll,Class,Section,Reg No,Status,First IN (UTC),Last OUT (UTC),Duration\n")
     for r in rows:
-        output.write(f'"{r[0]}","{r[1]}","{r[2]}"\n')
+        output.write(f'"{r["id"]}","{r["name"]}","{r["roll"]}","{r["class"]}","{r["section"]}","{r["reg_no"]}","{r["status"]}","{r["first_in_fmt"]}","{r["last_out_fmt"]}","{r["duration"]}"\n')
     mem = io.BytesIO(output.getvalue().encode("utf-8"))
     mem.seek(0)
-    return send_file(mem, as_attachment=True, download_name="attendance.csv", mimetype="text/csv")
+    return send_file(mem, as_attachment=True, download_name=f"entry_exit_{period}.csv", mimetype="text/csv")
 
 @app.route("/attendance_stats")
 @staff_or_admin_required
@@ -567,3 +697,4 @@ def attendance_stats():
 # ==============================================================================
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0')
+
