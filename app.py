@@ -45,31 +45,59 @@ def init_db():
     """Initializes the database and creates tables if they don't exist."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Table for student information
     c.execute("""CREATE TABLE IF NOT EXISTS students (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     roll TEXT, class TEXT, section TEXT, reg_no TEXT,
                     created_at TEXT
                 )""")
-    # Table for all attendance records
     c.execute("""CREATE TABLE IF NOT EXISTS attendance (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     student_id INTEGER, name TEXT, timestamp TEXT
                 )""")
-    # Table for user logins (admin, staff, student)
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
-        role TEXT NOT NULL, created_at TEXT
+        role TEXT NOT NULL, student_id INTEGER, created_at TEXT
     )""")
-    # Table for live notifications (IN/OUT actions)
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN student_id INTEGER")
+    except Exception:
+        pass
     c.execute("""CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER, student_name TEXT, action TEXT, timestamp TEXT
             )""")
     conn.commit()
     conn.close()
+
+
+def _resolve_student_for_user():
+    uid = session.get('user_id')
+    username = (session.get('username') or '').strip()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    try:
+        c.execute("SELECT student_id FROM users WHERE id=?", (uid,))
+        u = c.fetchone()
+        if u and u[0]:
+            c.execute("SELECT id,name,roll,class,section,reg_no,created_at FROM students WHERE id=?", (u[0],))
+            row = c.fetchone()
+            if row:
+                conn.close(); return row
+    except Exception:
+        pass
+    for q, params in [
+        ("SELECT id,name,roll,class,section,reg_no,created_at FROM students WHERE name=? LIMIT 1", (username,)),
+        ("SELECT id,name,roll,class,section,reg_no,created_at FROM students WHERE lower(name)=lower(?) LIMIT 1", (username,)),
+        ("SELECT id,name,roll,class,section,reg_no,created_at FROM students WHERE reg_no=? OR roll=? LIMIT 1", (username, username)),
+    ]:
+        try:
+            c.execute(q, params); row = c.fetchone()
+            if row: conn.close(); return row
+        except Exception:
+            pass
+    conn.close(); return None
 
 init_db()
 
@@ -111,7 +139,9 @@ def staff_or_admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'logged_in' not in session or session.get('role') not in ['admin', 'staff']:
-            return redirect(url_for('login'))
+            if request.path.startswith('/api/') or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.is_json or request.path in ('/cctv_control','/upload_video','/cctv_status'):
+                return jsonify({"error": "Unauthorized"}), 403
+            return "Access Denied: Staff or Admin privileges required.", 403
         return f(*args, **kwargs)
     return decorated_function
 
@@ -249,9 +279,9 @@ def cctv_processing_thread_target():
 # ADMIN-ONLY API & CONTROL ROUTES
 # ==============================================================================
 @app.route("/upload_video", methods=["POST"])
-@admin_required
+@staff_or_admin_required
 def upload_video():
-    """Upload a recorded video file to be processed for attendance."""
+    """Upload a recorded video file to be processed for attendance (common page; no CCTV setup now)."""
     if "video" not in request.files:
         return jsonify({"status": "error", "message": "No video file provided."}), 400
     file = request.files["video"]
@@ -272,16 +302,16 @@ def upload_video():
 
 
 @app.route("/cctv_control", methods=["POST"])
-@admin_required
+@staff_or_admin_required
 def cctv_control():
-    """API for Admins to start/stop monitoring (webcam, uploaded video, or CCTV/RTSP)."""
+    """Start/stop attendance marking (webcam, uploaded video, or CCTV/RTSP)."""
     global cctv_running, current_source, current_source_type, cctv_stop_reason
     data = request.get_json(silent=True) or {}
     action = data.get('action')
     if action == 'start' and not cctv_running:
         try:
             if load_model_if_exists() is None:
-                return jsonify({"status": "error", "message": "Model not trained. Please train the model first."}), 400
+                return jsonify({"status": "error", "message": "Model not trained. Ask admin to train the model."}), 400
         except Exception as e:
             return jsonify({"status": "error", "message": f"Model check failed: {e}"}), 500
         source_type = (data.get('source_type') or 'webcam').lower()
@@ -311,15 +341,15 @@ def cctv_control():
         return jsonify({"status": "started", "source_type": source_type})
     elif action == 'stop' and cctv_running:
         cctv_running = False
-        cctv_stop_reason = "Stopped by admin."
+        cctv_stop_reason = f"Stopped by {session.get('role','user')}."
         return jsonify({"status": "stopping"})
     return jsonify({"status": "already_running" if cctv_running else "stopped", "message": cctv_stop_reason})
 
 
 @app.route("/cctv_status", methods=["GET"])
-@admin_required
+@staff_or_admin_required
 def cctv_status():
-    """API for Admins to poll the status of the monitoring thread."""
+    """Poll the status of the monitoring thread."""
     global cctv_running, current_source, current_source_type, cctv_stop_reason
     display_source = os.path.basename(str(current_source)) if current_source_type == 'video' else str(current_source)
     return jsonify({
@@ -429,20 +459,46 @@ def get_notifications():
 @student_required
 def get_student_notifications():
     """API for a student to get their own filtered notification log."""
-    student_name = session.get('username') 
+    student = _resolve_student_for_user()
+    if not student:
+        return jsonify({"notifications": [], "error": "No linked student profile found. Ask admin to add your student record (matching your username/name/reg no)."}), 404
+    student_db_id = student[0]
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT id FROM students WHERE name = ?", (student_name,))
-    student_record = c.fetchone()
-    if not student_record:
-        conn.close()
-        return jsonify({"notifications": [], "error": "Student record not found."}), 404
-    student_db_id = student_record[0]
-    c.execute("SELECT student_name, action, timestamp FROM notifications WHERE student_id = ? ORDER BY id DESC LIMIT 50", (student_db_id,))
+    c.execute("SELECT student_name, action, timestamp FROM notifications WHERE student_id = ? ORDER BY id DESC LIMIT 100", (student_db_id,))
     rows = c.fetchall()
     conn.close()
     data = [{"name": r[0], "action": r[1], "timestamp": datetime.datetime.fromisoformat(r[2]).strftime('%Y-%m-%d %H:%M:%S')} for r in rows]
-    return jsonify({"notifications": data})
+    return jsonify({"notifications": data, "student": {"id": student[0], "name": student[1], "roll": student[2], "class": student[3], "section": student[4], "reg_no": student[5]}})
+
+
+@app.route("/student_summary", methods=["GET"])
+@student_required
+def student_summary():
+    student = _resolve_student_for_user()
+    if not student:
+        return jsonify({"ok": False, "error": "No linked student profile found."}), 404
+    sid = student[0]
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT action, timestamp FROM notifications WHERE student_id=? ORDER BY timestamp ASC", (sid,))
+    events = c.fetchall()
+    c.execute("SELECT count(*) FROM attendance WHERE student_id=?", (sid,))
+    total_marks = c.fetchone()[0]
+    conn.close()
+    first_in = last_out = None
+    present_days = set()
+    for action, ts in events:
+        day = (ts or "")[:10]
+        if action == 'IN':
+            present_days.add(day)
+            if not first_in or ts < first_in: first_in = ts
+        elif action == 'OUT':
+            if not last_out or ts > last_out: last_out = ts
+    def fmt(ts):
+        if not ts: return None
+        try: return datetime.datetime.fromisoformat(ts).strftime('%Y-%m-%d %H:%M:%S')
+        except Exception: return ts
+    return jsonify({"ok": True, "student": {"id": student[0], "name": student[1], "roll": student[2], "class": student[3], "section": student[4], "reg_no": student[5]}, "total_attendance_marks": total_marks, "days_present": len(present_days), "first_in": fmt(first_in), "last_out": fmt(last_out)})
 
 # ==============================================================================
 # GENERAL (LOGGED-IN) API ROUTES
@@ -514,6 +570,12 @@ def logout():
 def index():
     return render_template("index.html")
 
+@app.route("/mark_attendance")
+@staff_or_admin_required
+def mark_attendance_page():
+    """Common page (no CCTV setup now): laptop camera or uploaded video for attendance marking."""
+    return render_template("mark_attendance.html")
+
 @app.route("/staff_monitor")
 @staff_or_admin_required
 def staff_monitor():
@@ -522,7 +584,11 @@ def staff_monitor():
 @app.route("/student_dashboard")
 @student_required
 def student_dashboard():
-    return render_template("student_dashboard.html")
+    student = _resolve_student_for_user()
+    student_info = None
+    if student:
+        student_info = {"id": student[0], "name": student[1], "roll": student[2], "class": student[3], "section": student[4], "reg_no": student[5]}
+    return render_template("student_dashboard.html", student_info=student_info)
 
 @app.route("/add_student", methods=["GET", "POST"])
 @admin_required

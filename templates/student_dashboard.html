@@ -8,38 +8,54 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-<div class="right-panel">
-    <div class="card p-4 shadow-sm">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-             <h4 class="mb-0">Welcome, {{ session.get('username') }}!</h4>
-             <a href="/logout" class="btn btn-danger btn-sm">Logout</a>
-        </div>
-
-        <div class="alert alert-success small">
-            <strong>Access Level:</strong> Your personal attendance dashboard.
-        </div>
-        
-        <hr>
-
-        <!-- NEW: Personal Activity Log -->
-        <h5 class="mb-3">My Recent Activity</h5>
-        <ul id="personalNotificationList" class="list-group list-group-flush mb-3" style="max-height: 250px; overflow-y: auto;">
-            <li class="list-group-item text-muted small">Loading your records...</li>
-        </ul>
-        
-        <hr>
-        
-        <h5 class="mb-3">Sign Out (Mark Exit)</h5>
-        <div class="text-center">
-            <video id="signOutVideo" width="320" height="240" autoplay muted style="border-radius:8px; border:2px solid #ccc; display: none;"></video>
-            <div id="signOutStatus" class="alert alert-secondary mt-2 small">Click the button to use your face to sign out.</div>
-        </div>
-        <button id="signOutBtn" class="btn btn-warning w-100 mt-2">Sign Out by Face</button>
-
+<div class="main-container">
+  <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-4">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="/student_dashboard">Student Dashboard</a>
+      <a href="/logout" class="btn btn-danger btn-sm">Logout</a>
     </div>
+  </nav>
+  <div class="container" style="max-width: 900px;">
+    <div class="row g-3 mb-3">
+      <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="small text-muted">Days Present</div><div id="daysPresent" class="fs-4 fw-bold">-</div></div></div>
+      <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="small text-muted">Total IN Marks</div><div id="totalMarks" class="fs-4 fw-bold">-</div></div></div>
+      <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="small text-muted">Last OUT</div><div id="lastOut" class="small fw-semibold">-</div></div></div>
+    </div>
+
+    <div class="card p-4 shadow-sm glass-card mb-3">
+      <h5 class="mb-2">My Details</h5>
+      <div id="studentDetails" class="small text-muted">
+        {% if student_info %}
+          <strong>{{ student_info.name }}</strong> (ID {{ student_info.id }})<br>
+          Roll: {{ student_info.roll or '-' }} | Class: {{ student_info.class or '-' }} {{ student_info.section or '' }} | Reg: {{ student_info.reg_no or '-' }}
+        {% else %}
+          Welcome, {{ session.get('username') }}. No linked student profile found — ask admin to add a student record matching your username/name/reg no.
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card p-4 shadow-sm glass-card mb-3">
+      <h5 class="mb-3">My Attendance Activity</h5>
+      <div id="studentError" class="alert alert-warning small d-none"></div>
+      <ul id="personalNotificationList" class="list-group" style="max-height: 320px; overflow-y: auto;">
+        <li class="list-group-item text-muted small">Loading your records...</li>
+      </ul>
+    </div>
+
+    <div class="card p-4 shadow-sm glass-card">
+      <h5 class="mb-2">Sign Out (Mark Exit)</h5>
+      <p class="small text-muted">Use face recognition to record your exit (creates an OUT notification).</p>
+      <div class="text-center">
+        <video id="signOutVideo" width="320" height="240" autoplay muted style="border-radius:8px; border:2px solid #ccc; display:none; background:#f8f9fa;"></video>
+        <div id="signOutStatus" class="alert alert-secondary mt-2 small">Click the button to sign out by face.</div>
+      </div>
+      <button id="signOutBtn" class="btn btn-warning w-100 mt-2">Sign Out by Face</button>
+    </div>
+  </div>
 </div>
 <script src="{{ url_for('static', filename='js/student_dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='js/camera_signout.js') }}"></script>
 </body>
 </html>
+
 

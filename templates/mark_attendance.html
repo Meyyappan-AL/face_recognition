@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mark Attendance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="main-container">
+  <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-4">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="/mark_attendance">Mark Attendance</a>
+      <div class="d-flex gap-2">
+        {% if session.get('role') == 'admin' %}<a class="btn btn-outline-light btn-sm" href="/">Admin Dashboard</a>{% endif %}
+        <a class="btn btn-outline-light btn-sm" href="/attendance_record">Records</a>
+        <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container" style="max-width: 860px;">
+    <div class="alert alert-info small">
+      Common attendance page (no CCTV setup now). Use <strong>Laptop Camera</strong> or upload a <strong>recorded video</strong>. Auto IN is marked when a trained face is recognized (60s cooldown). OUT is recorded from the Staff/Student “Sign Out by Face” option.
+    </div>
+    <div class="card p-4 shadow-sm glass-card">
+      <h5 class="mb-3">Attendance Source</h5>
+      <div class="mb-2">
+        <label class="form-label small mb-1">Source</label>
+        <select id="sourceType" class="form-select form-select-sm">
+          <option value="webcam">Laptop Camera</option>
+          <option value="video">Uploaded Video</option>
+          <option value="cctv" disabled>CCTV/RTSP (later)</option>
+        </select>
+      </div>
+      <div id="webcamSourceWrap" class="mb-2">
+        <label class="form-label small mb-1">Camera Index</label>
+        <input id="cameraIndex" type="number" min="0" value="0" class="form-control form-control-sm">
+      </div>
+      <div id="videoSourceWrap" class="mb-2" style="display:none;">
+        <label class="form-label small mb-1">Upload Video</label>
+        <input id="videoFile" type="file" accept="video/*" class="form-control form-control-sm mb-2">
+        <button id="uploadVideoBtn" type="button" class="btn btn-sm btn-outline-primary w-100">Upload Video</button>
+        <div id="uploadStatus" class="small text-muted mt-1"></div>
+        <input id="uploadedVideoName" type="hidden" value="">
+      </div>
+      <div class="d-flex gap-2 mt-2">
+        <button id="startMonitorBtn" type="button" class="btn btn-success">Start Marking</button>
+        <button id="stopMonitorBtn" type="button" class="btn btn-danger" disabled>Stop</button>
+        <a class="btn btn-outline-secondary" href="/attendance_record">View Records</a>
+      </div>
+      <div id="monitorStatus" class="alert alert-secondary mt-3 mb-0 small py-2">Monitoring idle.</div>
+      <div class="small text-muted mt-2">Tip: if attendance isn’t marked, ensure the model is trained (admin) and watch the server terminal for `no_face` / `low_conf` messages.</div>
+    </div>
+
+    <div class="card p-3 shadow-sm glass-card mt-3">
+      <h6 class="mb-2">How to test</h6>
+      <ol class="small mb-0">
+        <li>Admin adds student (clear frontal face) and trains model.</li>
+        <li>Start Laptop Camera or upload a recorded video here.</li>
+        <li>Check Staff Monitor / Records for IN entries; use Sign Out by Face for OUT.</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='js/admin_dashboard.js') }}"></script>
+</body>
+</html>
