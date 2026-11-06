@@ -240,7 +240,55 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // --- Manual attendance (admin/staff) ---
+    const manualStudent = document.getElementById("manualStudent");
+    const manualDate = document.getElementById("manualDate");
+    const manualStatus = document.getElementById("manualStatus");
+    const manualNote = document.getElementById("manualNote");
+    const manualSubmitBtn = document.getElementById("manualSubmitBtn");
+    const manualMsg = document.getElementById("manualMsg");
+
+    async function loadManualStudents() {
+        if (!manualStudent) return;
+        try {
+            const res = await fetch("/students");
+            const data = await res.json().catch(()=>({}));
+            if (!res.ok) { manualStudent.innerHTML = '<option value="">Unable to load students</option>'; return; }
+            const list = data.students || [];
+            if (!list.length) { manualStudent.innerHTML = '<option value="">No students found</option>'; return; }
+            manualStudent.innerHTML = '<option value="">Select student...</option>' + list.map(s => `<option value="${s.id}">${s.name} (ID ${s.id}${s.roll ? ', '+s.roll : ''})</option>`).join('');
+        } catch (e) {
+            manualStudent.innerHTML = '<option value="">Network error</option>';
+        }
+    }
+    if (manualDate && !manualDate.value) {
+        try { manualDate.value = new Date().toISOString().slice(0,10); } catch (_) {}
+    }
+    if (manualSubmitBtn) {
+        manualSubmitBtn.addEventListener("click", async () => {
+            if (!manualStudent || !manualStudent.value) { if (manualMsg) manualMsg.textContent = "Select a student."; return; }
+            manualSubmitBtn.disabled = true;
+            if (manualMsg) manualMsg.textContent = "Saving...";
+            try {
+                const res = await fetch("/manual_attendance", {
+                    method: "POST", headers: {"Content-Type":"application/json"},
+                    body: JSON.stringify({ student_id: manualStudent.value, status: manualStatus ? manualStatus.value : "Present", date: manualDate ? manualDate.value : "", note: manualNote ? manualNote.value : "" })
+                });
+                const data = await res.json().catch(()=>({}));
+                if (res.ok && data.ok) {
+                    if (manualMsg) manualMsg.textContent = `Saved: ${data.name} marked ${data.status} on ${data.date}.`;
+                    if (manualNote) manualNote.value = "";
+                } else {
+                    if (manualMsg) manualMsg.textContent = data.error || "Failed to save.";
+                }
+            } catch (e) {
+                if (manualMsg) manualMsg.textContent = "Network error.";
+            } finally { manualSubmitBtn.disabled = false; }
+        });
+    }
+
     // --- Initial Load ---
+    if (manualStudent) loadManualStudents();
     if (monitorStatus) updateMonitorStatus();
     if (trainBtn && trainProgress && trainMsg) pollTrainStatus();
     if (attendanceChartCanvas) updateChart();

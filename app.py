@@ -53,8 +53,13 @@ def init_db():
                 )""")
     c.execute("""CREATE TABLE IF NOT EXISTS attendance (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    student_id INTEGER, name TEXT, timestamp TEXT
+                    student_id INTEGER, name TEXT, timestamp TEXT, source TEXT DEFAULT 'auto', marked_by TEXT
                 )""")
+    for coldef in [("source", "TEXT DEFAULT 'auto'"), ("marked_by", "TEXT")]:
+        try:
+            c.execute(f"ALTER TABLE attendance ADD COLUMN {coldef[0]} {coldef[1]}")
+        except Exception:
+            pass
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
@@ -66,7 +71,17 @@ def init_db():
         pass
     c.execute("""CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER, student_name TEXT, action TEXT, timestamp TEXT
+                student_id INTEGER, student_name TEXT, action TEXT, timestamp TEXT, source TEXT DEFAULT 'auto', marked_by TEXT
+            )""")
+    for coldef in [("source", "TEXT DEFAULT 'auto'"), ("marked_by", "TEXT")]:
+        try:
+            c.execute(f"ALTER TABLE notifications ADD COLUMN {coldef[0]} {coldef[1]}")
+        except Exception:
+            pass
+    c.execute("""CREATE TABLE IF NOT EXISTS manual_attendance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER, student_name TEXT, date TEXT, status TEXT, note TEXT,
+                marked_by TEXT, marked_role TEXT, created_at TEXT
             )""")
     conn.commit()
     conn.close()
@@ -222,8 +237,8 @@ def process_frame_for_attendance(frame):
         row = c.fetchone()
         name = row[0] if row else "Unknown"
         ts = datetime.datetime.utcnow().isoformat()
-        c.execute("INSERT INTO attendance (student_id, name, timestamp) VALUES (?, ?, ?)", (student_id, name, ts))
-        c.execute("INSERT INTO notifications (student_id, student_name, action, timestamp) VALUES (?, ?, ?, ?)", (student_id, name, 'IN', ts))
+        c.execute("INSERT INTO attendance (student_id, name, timestamp, source) VALUES (?, ?, ?, ?)", (student_id, name, ts, 'auto'))
+        c.execute("INSERT INTO notifications (student_id, student_name, action, timestamp, source) VALUES (?, ?, ?, ?, ?)", (student_id, name, 'IN', ts, 'auto'))
         conn.commit()
         conn.close()
         _attendance_debug["marked"] += 1
@@ -376,11 +391,11 @@ def train_status():
     return jsonify(read_train_status())
 
 @app.route("/students", methods=["GET"])
-@admin_required
+@staff_or_admin_required
 def students_list():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT id, name, roll, class, section, reg_no FROM students ORDER BY id DESC")
+    c.execute("SELECT id, name, roll, class, section, reg_no FROM students ORDER BY name ASC")
     rows = c.fetchall()
     conn.close()
     data = [ {"id":r[0],"name":r[1],"roll":r[2],"class":r[3],"section":r[4],"reg_no":r[5]} for r in rows ]
@@ -522,7 +537,7 @@ def sign_out_face():
         row = c.fetchone()
         name = row[0] if row else "Unknown"
         ts = datetime.datetime.utcnow().isoformat()
-        c.execute("INSERT INTO notifications (student_id, student_name, action, timestamp) VALUES (?, ?, ?, ?)", (student_id, name, 'OUT', ts))
+        c.execute("INSERT INTO notifications (student_id, student_name, action, timestamp, source) VALUES (?, ?, ?, ?, ?)", (student_id, name, 'OUT', ts, 'face'))
         conn.commit()
         conn.close()
         return jsonify({"status": "signed_out", "name": name, "confidence": float(conf)}), 200
@@ -573,7 +588,9 @@ def index():
 @app.route("/mark_attendance")
 @staff_or_admin_required
 def mark_attendance_page():
-    """Common page (no CCTV setup now): laptop camera or uploaded video for attendance marking."""
+    """Common temporary page (no CCTV setup now): laptop camera or uploaded video for attendance marking."""
+    if session.get('role') not in ('admin', 'staff'):
+        return redirect(url_for('student_dashboard'))
     return render_template("mark_attendance.html")
 
 @app.route("/staff_monitor")
@@ -636,60 +653,93 @@ def _period_where(period, ts_col="timestamp"):
     return ""
 
 
+def _day_bounds_for_period(period):
+    today = datetime.date.today()
+    if period == "daily":
+        return today.isoformat(), today.isoformat()
+    if period == "weekly":
+        return (today - datetime.timedelta(days=6)).isoformat(), today.isoformat()
+    if period == "monthly":
+        return (today - datetime.timedelta(days=29)).isoformat(), today.isoformat()
+    return None, None
+
+
+def _manual_overrides(start_date, end_date):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    q = "SELECT student_id, status, note, marked_by, marked_role, date FROM manual_attendance"
+    params = []
+    if start_date and end_date:
+        q += " WHERE date BETWEEN ? AND ?"; params = [start_date, end_date]
+    elif start_date:
+        q += " WHERE date>=?"; params = [start_date]
+    q += " ORDER BY date DESC, id DESC"
+    try:
+        c.execute(q, params); rows = c.fetchall()
+    except Exception:
+        rows = []
+    conn.close()
+    # latest per (student_id, date) but for range report we need "any absent override"/"any present override"? keep latest per day
+    out = {}
+    for sid, status, note, by, role, d in rows:
+        key = (sid, d)
+        if key not in out:
+            out[key] = {"status": status, "note": note or "", "marked_by": by or "", "marked_role": role or "", "date": d}
+    return out
+
+
 def _entry_exit_rows(period):
-    """Compute first IN / last OUT per student from notifications in the selected period."""
+    """Compute first IN / last OUT per student from notifications in the selected period, honoring manual overrides."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, name, roll, class, section, reg_no FROM students ORDER BY name")
     students = c.fetchall()
     where = _period_where(period)
-    c.execute(
-        "SELECT student_id, student_name, action, timestamp FROM notifications" + where + " ORDER BY timestamp ASC"
-    )
+    c.execute("SELECT student_id, student_name, action, timestamp FROM notifications" + where + " ORDER BY timestamp ASC")
     events = c.fetchall()
     conn.close()
 
     by_id = {}
     for sid, sname, roll, cls, sec, reg in students:
-        by_id[sid] = {
-            "id": sid, "name": sname, "roll": roll or "", "class": cls or "", "section": sec or "",
-            "reg_no": reg or "", "first_in": None, "last_out": None, "status": "Absent"
-        }
+        by_id[sid] = {"id": sid, "name": sname, "roll": roll or "", "class": cls or "", "section": sec or "", "reg_no": reg or "", "first_in": None, "last_out": None, "status": "Absent", "manual": ""}
     for sid, sname, action, ts in events:
         try:
             sid_i = int(sid) if sid is not None else None
         except Exception:
             sid_i = None
         if sid_i is None or sid_i not in by_id:
-            # handle legacy rows where student_id may not map cleanly
-            key = None
-            for k, v in by_id.items():
-                if v["name"] == sname:
-                    key = k; break
-            if key is None:
-                continue
-            sid_i = key
+            sid_i = next((k for k,v in by_id.items() if v["name"] == sname), None)
+            if sid_i is None: continue
         rec = by_id[sid_i]
         if action == "IN":
-            if rec["first_in"] is None or ts < rec["first_in"]:
-                rec["first_in"] = ts
+            if rec["first_in"] is None or ts < rec["first_in"]: rec["first_in"] = ts
             rec["status"] = "Present"
         elif action == "OUT":
-            if rec["last_out"] is None or ts > rec["last_out"]:
-                rec["last_out"] = ts
+            if rec["last_out"] is None or ts > rec["last_out"]: rec["last_out"] = ts
             if rec["first_in"] is not None:
                 rec["status"] = "Exited" if rec["last_out"] >= rec["first_in"] else "Present"
+
+    start_d, end_d = _day_bounds_for_period(period)
+    if start_d and end_d:
+        overrides = _manual_overrides(start_d, end_d)
+        for (sid, d), ov in overrides.items():
+            if sid not in by_id: continue
+            rec = by_id[sid]
+            if ov["status"] == "Absent":
+                # explicit absent for that day in the selected range
+                if period == "daily":
+                    rec["status"] = "Absent"; rec["first_in"] = None; rec["last_out"] = None
+                rec["manual"] = f"Absent({ov['marked_by'] or 'manual'})"
+            elif ov["status"] == "Present" and rec["status"] == "Absent":
+                rec["status"] = "Present (Manual)"; rec["manual"] = f"Present({ov['marked_by'] or 'manual'})"
 
     rows = []
     for rec in by_id.values():
         duration = ""
         if rec["first_in"] and rec["last_out"]:
             try:
-                t1 = datetime.datetime.fromisoformat(rec["first_in"])
-                t2 = datetime.datetime.fromisoformat(rec["last_out"])
+                t1 = datetime.datetime.fromisoformat(rec["first_in"]); t2 = datetime.datetime.fromisoformat(rec["last_out"])
                 if t2 >= t1:
-                    mins = int((t2 - t1).total_seconds() // 60)
-                    duration = f"{mins // 60}h {mins % 60}m"
+                    mins = int((t2 - t1).total_seconds() // 60); duration = f"{mins // 60}h {mins % 60}m"
             except Exception:
                 duration = ""
         def fmt(ts):
@@ -697,9 +747,7 @@ def _entry_exit_rows(period):
             try: return datetime.datetime.fromisoformat(ts).strftime('%Y-%m-%d %H:%M:%S')
             except Exception: return ts
         rows.append({**rec, "first_in_fmt": fmt(rec["first_in"]), "last_out_fmt": fmt(rec["last_out"]), "duration": duration})
-
-    # summary
-    present = sum(1 for r in rows if r["status"] != "Absent")
+    present = sum(1 for r in rows if r["status"] not in ("Absent",))
     absent = sum(1 for r in rows if r["status"] == "Absent")
     return rows, {"total": len(rows), "present": present, "absent": absent}
 
@@ -732,12 +780,49 @@ def download_entry_exit_csv():
     period = request.args.get("period", "daily")
     rows, _ = _entry_exit_rows(period)
     output = io.StringIO()
-    output.write("Student ID,Name,Roll,Class,Section,Reg No,Status,First IN (UTC),Last OUT (UTC),Duration\n")
+    output.write("Student ID,Name,Roll,Class,Section,Reg No,Status,First IN (UTC),Last OUT (UTC),Duration,Manual\n")
     for r in rows:
-        output.write(f'"{r["id"]}","{r["name"]}","{r["roll"]}","{r["class"]}","{r["section"]}","{r["reg_no"]}","{r["status"]}","{r["first_in_fmt"]}","{r["last_out_fmt"]}","{r["duration"]}"\n')
+        output.write(f'"{r["id"]}","{r["name"]}","{r["roll"]}","{r["class"]}","{r["section"]}","{r["reg_no"]}","{r["status"]}","{r["first_in_fmt"]}","{r["last_out_fmt"]}","{r["duration"]}","{r.get("manual","")}"\n')
     mem = io.BytesIO(output.getvalue().encode("utf-8"))
     mem.seek(0)
     return send_file(mem, as_attachment=True, download_name=f"entry_exit_{period}.csv", mimetype="text/csv")
+
+
+@app.route("/manual_attendance", methods=["POST"])
+@staff_or_admin_required
+def manual_attendance():
+    data = request.get_json(silent=True) or {}
+    sid = data.get("student_id")
+    status = (data.get("status") or "").strip().title()
+    date_str = (data.get("date") or "").strip() or datetime.date.today().isoformat()
+    note = (data.get("note") or "").strip()
+    if status not in ("Present", "Absent"):
+        return jsonify({"ok": False, "error": "status must be Present or Absent"}), 400
+    try:
+        sid = int(sid)
+        datetime.date.fromisoformat(date_str)
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid student_id/date"}), 400
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT id,name FROM students WHERE id=?", (sid,))
+    row = c.fetchone()
+    if not row:
+        conn.close(); return jsonify({"ok": False, "error": "Student not found"}), 404
+    marked_by = session.get('username') or 'user'
+    marked_role = session.get('role') or ''
+    now = datetime.datetime.utcnow().isoformat()
+    c.execute("INSERT INTO manual_attendance (student_id,student_name,date,status,note,marked_by,marked_role,created_at) VALUES (?,?,?,?,?,?,?,?)",
+              (sid, row[1], date_str, status, note, marked_by, marked_role, now))
+    if status == "Present":
+        ts = f"{date_str}T{datetime.datetime.utcnow().strftime('%H:%M:%S')}"
+        c.execute("INSERT INTO attendance (student_id,name,timestamp,source,marked_by) VALUES (?,?,?,?,?)", (sid, row[1], ts, 'manual', marked_by))
+        c.execute("INSERT INTO notifications (student_id,student_name,action,timestamp,source,marked_by) VALUES (?,?,?,?,?,?,?)", (sid, row[1], 'IN', ts, 'manual', marked_by))
+    elif status == "Absent":
+        # remove auto/manual IN/OUT notifications for that day? keep simple: insert an ABSENT marker notification for visibility
+        ts = f"{date_str}T{datetime.datetime.utcnow().strftime('%H:%M:%S')}"
+        c.execute("INSERT INTO notifications (student_id,student_name,action,timestamp,source,marked_by) VALUES (?,?,?,?,?,?,?)", (sid, row[1], 'ABSENT', ts, 'manual', marked_by))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True, "student_id": sid, "name": row[1], "status": status, "date": date_str})
 
 @app.route("/attendance_stats")
 @staff_or_admin_required

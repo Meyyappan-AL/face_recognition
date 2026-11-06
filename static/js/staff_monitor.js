@@ -22,18 +22,18 @@ document.addEventListener("DOMContentLoaded", () => {
             data.notifications.forEach(n => {
                 const li = document.createElement('li');
                 const isNew = n.timestamp > latestTimestampShown && latestTimestampShown;
-                const actionText = n.action === 'IN' ? 'ENTERED' : 'EXITED';
-                const bgColor = n.action === 'IN' ? 'list-group-item-success-light' : 'list-group-item-info-light';
-                const textColor = n.action === 'IN' ? 'text-success-emphasis' : 'text-info-emphasis';
-                const borderColor = n.action === 'IN' ? 'border-success-subtle' : 'border-info-subtle';
+                let actionText = 'UPDATED', bgColor = 'list-group-item-light', textColor = 'text-body', borderColor = 'border-secondary-subtle';
+                if (n.action === 'IN') { actionText='ENTERED'; bgColor='list-group-item-success-light'; textColor='text-success-emphasis'; borderColor='border-success-subtle'; }
+                else if (n.action === 'OUT') { actionText='EXITED'; bgColor='list-group-item-info-light'; textColor='text-info-emphasis'; borderColor='border-info-subtle'; }
+                else if (n.action === 'ABSENT') { actionText='MARKED ABSENT'; bgColor='list-group-item-danger-light'; textColor='text-danger-emphasis'; borderColor='border-danger-subtle'; }
 
                 li.className = `list-group-item small d-flex justify-content-between align-items-center ${bgColor} ${borderColor}`;
                 li.style.borderLeftWidth = '4px';
                 if (isNew) li.classList.add('new-notification-entry');
 
                 li.innerHTML = `
-                    <span><strong class="${textColor}">${n.name}</strong> has ${actionText}.</span>
-                    <span class="badge bg-secondary rounded-pill">${n.timestamp.split(' ')[1]}</span>`;
+                    <span><strong class="${textColor}">${n.name}</strong> ${actionText}.</span>
+                    <span class="badge bg-secondary rounded-pill">${(n.timestamp||'').split(' ')[1] || ''}</span>`;
                 
                 notificationList.appendChild(li);
             });
