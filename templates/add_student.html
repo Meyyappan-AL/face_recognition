@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Add Student</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="main-container">
+    <!-- Consistent Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-4">
+      <div class="container-fluid">
+        <a class="navbar-brand fw-bold" href="/">Digital Attendance</a>
+        <div class="d-flex">
+          <a class="btn btn-outline-light me-2" href="/">Back to Dashboard</a>
+          <a class="btn btn-danger" href="/logout">Logout</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container">
+      <div class="row justify-content-center">
+        <div class="col-md-10">
+          <div class="card p-4 shadow-sm glass-card">
+            <h4 class="mb-3">Add New Student & Capture Faces</h4>
+
+            <form id="studentForm">
+              <div class="row g-2">
+                <div class="col-md-6"><input class="form-control" name="name" placeholder="Full Name" required></div>
+                <div class="col-md-3"><input class="form-control" name="roll" placeholder="Roll No."></div>
+                <div class="col-md-3"><input class="form-control" name="reg_no" placeholder="Registration No."></div>
+                <div class="col-md-6"><input class="form-control" name="class" placeholder="Class (e.g., '12th')"></div>
+                <div class="col-md-6"><input class="form-control" name="sec" placeholder="Section (e.g., 'A')"></div>
+              </div>
+              <div class="mt-3 d-flex gap-2 align-items-center">
+                <button id="saveInfoBtn" type="submit" class="btn btn-primary">1. Save Info</button>
+                <button id="startCaptureBtn" type="button" class="btn btn-warning" disabled>2. Start Capture (50)</button>
+                <button id="addStudentBtn" type="button" class="btn btn-success" disabled>3. Finish & Add Student</button>
+              </div>
+            </form>
+
+            <hr>
+
+            <div class="text-center">
+              <video id="video" width="560" height="420" autoplay muted style="border-radius:10px; border:2px solid #e2e8f0; background:#f8f9fa;"></video>
+              <div class="mt-2">
+                <div id="captureStatus" class="small text-muted">Press "Start Capture" and face the camera.</div>
+                <div class="progress mt-1" style="height:12px;">
+                  <div id="progressBar" class="progress-bar bg-success" style="width:0%"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/camera_add_student.js') }}"></script>
+</body>
+</html>
+
