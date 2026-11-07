@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>OD / On-Duty</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="main-container">
+  <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-3">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="/od">OD / On-Duty</a>
+      <div class="d-flex gap-2 flex-wrap">
+        {% if session.get('role')=='student' %}<a class="btn btn-outline-light btn-sm" href="/student_dashboard">Dashboard</a>{% endif %}
+        {% if session.get('role') in ['staff','hod','admin'] %}<a class="btn btn-outline-light btn-sm" href="/staff_monitor">Dashboard</a>{% endif %}
+        <a class="btn btn-outline-light btn-sm" href="/profile">Profile</a>
+        <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
+      </div>
+    </div>
+  </nav>
+  <div class="container" style="max-width:1100px">
+    <div class="alert alert-secondary small">OD rules: <strong>Period OD</strong> for class periods — consent/handling staff can assign OD for handled periods. <strong>Day OD</strong> — request goes to <strong>class advisor</strong> first; if advisor approves, <strong>HOD</strong> must approve; only then OD is considered. If advisor or HOD rejects, OD is cancelled. Day OD requires proof/letter (max 50MB).</div>
+
+    {% if session.get('role')=='student' %}
+    <div class="card p-3 shadow-sm glass-card mb-3">
+      <h5>Request Day OD (Advisor → HOD)</h5>
+      <form id="odForm">
+        <div class="row g-2">
+          <div class="col-md-3"><label class="form-label small">From Date *</label><input class="form-control form-control-sm" type="date" name="from_date" value="{{ today }}" required></div>
+          <div class="col-md-3"><label class="form-label small">To Date</label><input class="form-control form-control-sm" type="date" name="to_date" value="{{ today }}"></div>
+          <div class="col-md-3"><label class="form-label small">Scope</label><select class="form-select form-select-sm" name="day_wise"><option value="1">Day OD (needs proof)</option><option value="0">Period OD request</option></select></div>
+          <div class="col-md-3"><label class="form-label small">Periods (optional)</label><input class="form-control form-control-sm" name="periods_json" placeholder='e.g. 1,2,3'></div>
+          <div class="col-12"><label class="form-label small">Reason *</label><textarea class="form-control form-control-sm" name="reason" rows="2" required></textarea></div>
+          <div class="col-md-8"><label class="form-label small">Proof/Letter (required for Day OD, max 50MB)</label><input class="form-control form-control-sm" type="file" name="proof"></div>
+          <div class="col-md-4 d-grid align-items-end"><button class="btn btn-primary btn-sm" type="submit">Submit OD Request</button></div>
+        </div>
+      </form>
+      <div id="odMsg" class="small mt-2"></div>
+    </div>
+    <div class="card p-3 shadow-sm glass-card">
+      <h5>My OD Requests</h5>
+      <div class="table-responsive"><table class="table table-sm"><thead><tr><th>ID</th><th>Dates</th><th>Reason</th><th>Status</th><th>Advisor</th><th>HOD</th><th>Proof</th></tr></thead><tbody id="myOdBody"><tr><td colspan="7" class="small text-muted">Loading...</td></tr></tbody></table></div>
+    </div>
+    {% else %}
+    <div class="card p-3 shadow-sm glass-card">
+      <div class="d-flex justify-content-between align-items-center mb-2"><h5 class="mb-0">OD Requests (Review)</h5><button id="refreshOd" class="btn btn-outline-secondary btn-sm">Refresh</button></div>
+      <p class="small text-muted mb-2">Class advisor sees own class pending requests. HOD/Admin see advisor-approved requests for final approval. Reject at any stage cancels OD.</p>
+      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>ID</th><th>Student</th><th>Class</th><th>Dates</th><th>Reason</th><th>Status</th><th>Proof</th><th>Actions</th></tr></thead><tbody id="odBody"><tr><td colspan="8" class="small text-muted">Loading...</td></tr></tbody></table></div>
+      <div id="odMsg" class="small mt-2"></div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+function esc(s){return (s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function msg(t,c='text-muted'){const el=$('odMsg'); if(el){el.className='small mt-2 '+c; el.textContent=t;}}
+{% if session.get('role')=='student' %}
+async function loadMy(){
+  const r=await fetch('/api/od/my'); const d=await r.json();
+  const rows=d.requests||[]; $('myOdBody').innerHTML=rows.length?rows.map(x=>`<tr><td>${x.id}</td><td>${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' → '+esc(x.to_date):''} ${x.day_wise?'<span class="badge bg-secondary">Day</span>':''}</td><td class="small">${esc(x.reason)}</td><td><span class="badge ${x.status==='od_approved'?'bg-success':x.status==='cancelled'?'bg-danger':'bg-warning text-dark'}">${esc(x.status)}</span></td><td class="small">${esc(x.advisor_decision||'-')} ${esc(x.advisor_note||'')}</td><td class="small">${esc(x.hod_decision||'-')} ${esc(x.hod_note||'')}</td><td class="small">${esc(x.proof_name||'-')}</td></tr>`).join(''):'<tr><td colspan="7" class="small text-muted">No requests.</td></tr>';
+}
+$('odForm').addEventListener('submit', async e=>{
+  e.preventDefault(); msg('Submitting...'); const fd=new FormData(e.target);
+  const r=await fetch('/api/od/request',{method:'POST',body:fd}); const d=await r.json();
+  if(r.ok&&d.ok){msg(d.message||'Submitted','text-success'); e.target.reset(); loadMy();}
+  else msg(d.error||'Failed','text-danger');
+});
+loadMy();
+{% else %}
+async function loadPending(){
+  const r=await fetch('/api/od/pending'); const d=await r.json(); const rows=d.requests||[];
+  $('odBody').innerHTML=rows.length?rows.map(x=>`<tr>
+    <td>${x.id}</td><td>${esc(x.student_name)}<div class="small text-muted">${esc(x.reg_no||'')}</div></td><td>${esc(x.class_name)}</td>
+    <td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' → '+esc(x.to_date):''}${x.day_wise?' (Day)':''}</td>
+    <td class="small">${esc(x.reason)}</td><td><span class="badge bg-info text-dark">${esc(x.status)}</span></td>
+    <td>${x.proof_name?`<a class="btn btn-outline-secondary btn-sm" href="/api/od/proof/${x.id}">Proof</a>`:'-'}</td>
+    <td><div class="btn-group btn-group-sm flex-wrap">
+      <button class="btn btn-outline-success" onclick="reviewOd(${x.id},'advisor_approve')">Advisor Approve</button>
+      <button class="btn btn-outline-danger" onclick="reviewOd(${x.id},'advisor_reject')">Advisor Reject</button>
+      <button class="btn btn-success" onclick="reviewOd(${x.id},'hod_approve')">HOD Approve</button>
+      <button class="btn btn-danger" onclick="reviewOd(${x.id},'hod_reject')">HOD Reject</button>
+    </div></td></tr>`).join(''):'<tr><td colspan="8" class="small text-muted">No pending requests in your scope.</td></tr>';
+}
+window.reviewOd=async (request_id,action)=>{
+  const note=prompt('Note (optional):')||''; msg('Updating...');
+  const r=await fetch('/api/od/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id,action,note})});
+  const d=await r.json(); if(r.ok&&d.ok){msg('Updated: '+action,'text-success'); loadPending();} else msg(d.error||'Failed','text-danger');
+};
+$('refreshOd').addEventListener('click', loadPending); loadPending();
+{% endif %}
+</script>
+</body>
+</html>

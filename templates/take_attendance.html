@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Take Attendance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .roster-photo{width:44px;height:44px;object-fit:cover;border-radius:8px;background:#e9ecef}
+    .status-btn.active{box-shadow:0 0 0 2px rgba(13,110,253,.25)}
+    .table-wrap{max-height:62vh;overflow:auto}
+    .sticky-head th{position:sticky;top:0;background:#fff;z-index:1}
+  </style>
+</head>
+<body>
+<div class="main-container">
+  <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-3">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="/take_attendance">Manual Take Attendance</a>
+      <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-outline-light btn-sm" href="/staff_monitor">Dashboard</a>
+        <a class="btn btn-outline-light btn-sm" href="/attendance_record">Records</a>
+        <a class="btn btn-outline-light btn-sm" href="/profile">My Profile</a>
+        {% if session.get('role')=='admin' %}<a class="btn btn-outline-light btn-sm" href="/">Admin</a>{% endif %}
+        <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container-fluid px-0 px-md-2">
+    <div class="card p-3 shadow-sm glass-card mb-3">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-2">
+          <label class="form-label small mb-1">Classroom</label>
+          <select id="className" class="form-select form-select-sm">
+            <option value="">Select</option>
+            {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-1">Date</label>
+          <input id="attDate" type="date" class="form-control form-control-sm" value="{{ today }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-1">Period</label>
+          <select id="period" class="form-select form-select-sm">
+            <option value="">Select</option>
+            {% for p in range(1,8) %}<option value="{{ p }}">Period {{ p }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small mb-1">Timetable / Access</label>
+          <div id="periodMeta" class="small border rounded p-2 bg-light">Select class, date, and period.</div>
+        </div>
+        <div class="col-md-2 d-grid gap-1">
+          <button id="loadBtn" class="btn btn-primary btn-sm">Load Students</button>
+          <button id="resetBtn" class="btn btn-outline-secondary btn-sm" type="button">Reset Absent</button>
+        </div>
+      </div>
+      <div class="small text-muted mt-2">Manual mode (no camera). <strong>Default: Absent</strong> — mark Present only if explicitly present. No exit required; missing exit never marks absent. Staff can mark only their assigned timetable periods; class advisor has full-day access for their own class; HOD can override. Multi-staff cells: any listed staff can mark the roster shown.</div>
+      <div id="msg" class="small mt-2"></div>
+    </div>
+
+    <div class="card p-3 shadow-sm glass-card">
+      <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-2">
+        <div><strong id="rosterTitle">Student Roster</strong> <span id="countBadge" class="badge bg-secondary">0</span></div>
+        <div class="d-flex gap-2 flex-wrap">
+          <input id="searchBox" class="form-control form-control-sm" style="min-width:180px" placeholder="Search name/reg/roll">
+          <button id="allPresent" class="btn btn-outline-success btn-sm" type="button">All Present</button>
+          <button id="allAbsent" class="btn btn-outline-warning btn-sm" type="button">All Absent</button>
+          <button id="submitBtn" class="btn btn-success btn-sm" disabled>Submit Attendance</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-sm align-middle sticky-head">
+          <thead><tr>
+            <th>Photo</th><th>Reg No</th><th>Name</th><th>Roll</th><th>Details</th><th style="min-width:220px">Status (default Absent)</th>
+          </tr></thead>
+          <tbody id="rosterBody"><tr><td colspan="6" class="text-muted small">Load a period to view students.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let roster=[], canMark=false, ctx={};
+
+function esc(s){return (s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function setMsg(t,cls='text-muted'){$('msg').className='small mt-2 '+cls; $('msg').textContent=t;}
+
+async function loadCell(){
+  const cls=$('className').value, date=$('attDate').value, period=$('period').value;
+  if(!cls||!date||!period) return;
+  const r=await fetch(`/api/timetable/cell?class=${encodeURIComponent(cls)}&date=${encodeURIComponent(date)}&period=${encodeURIComponent(period)}`);
+  const d=await r.json(); const c=d.cell||{};
+  $('periodMeta').innerHTML = d.ok
+    ? `<div><strong>${esc(c.display||c.subject||'Period')}</strong> <span class="badge ${d.can_mark?'bg-success':'bg-danger'}">${d.can_mark?'Allowed':'Not allowed'}</span></div>
+       <div class="text-muted">Day: ${esc(d.day||'')} | Time: ${esc(c.time||'')} | Staff: ${esc((c.staff||[]).join(', '))}</div>
+       <div class="text-muted">${esc(d.access_reason||'')}</div>`
+    : `<span class="text-danger">Timetable cell not found for selected period.</span>`;
+}
+['className','attDate','period'].forEach(id=>$(id).addEventListener('change', loadCell));
+
+function render(){
+  const q=($('searchBox').value||'').toLowerCase();
+  const rows=roster.filter(s=>!q||[s.name,s.reg_no,s.roll,s.class].join(' ').toLowerCase().includes(q));
+  $('countBadge').textContent=roster.length;
+  $('rosterBody').innerHTML = rows.length? rows.map(s=>{
+    const st=s.status||'Absent'; const locked=!!s.locked_absent;
+    const btn=(v,label,cls)=>`<button type="button" class="btn btn-sm ${cls} status-btn ${st===v?'active':''} ${locked&&v!=='Absent'?'disabled':''}" data-id="${s.id}" data-status="${v}" ${locked&&v!=='Absent'?'disabled':''}>${label}</button>`;
+    return `<tr data-sid="${s.id}">
+      <td>${s.photo_url?`<img class="roster-photo" src="${s.photo_url}" alt="">`:`<div class="roster-photo d-inline-flex align-items-center justify-content-center text-muted small">N/A</div>`}</td>
+      <td>${esc(s.reg_no||'-')}</td>
+      <td class="fw-semibold">${esc(s.name||'-')} ${s.locked_absent?'<div class="text-danger small">Absent locked (subject staff only)</div>':''}</td>
+      <td>${esc(s.roll||'-')}</td>
+      <td class="small text-muted">${esc(s.class||'')} ${esc(s.section||'')}<br>${esc(s.phone||'')} ${esc(s.email||'')}</td>
+      <td><div class="btn-group btn-group-sm" role="group">
+        ${btn('Present','Present','btn-outline-success')}
+        ${btn('Absent','Absent','btn-outline-secondary')}
+        ${btn('OD','OD','btn-outline-primary')}
+      </div></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="6" class="text-muted small">No students found for this class (check class name like 24IIT5A/24IIT5B in student records).</td></tr>';
+}
+$('searchBox').addEventListener('input', render);
+document.addEventListener('click', e=>{
+  const b=e.target.closest('.status-btn'); if(!b) return;
+  if(b.disabled) return; const s=roster.find(x=>String(x.id)===String(b.dataset.id)); if(!s) return;
+  s.status=b.dataset.status; render();
+});
+
+$('loadBtn').addEventListener('click', async ()=>{
+  const cls=$('className').value, date=$('attDate').value, period=$('period').value;
+  if(!cls||!date||!period){setMsg('Select classroom, date and period.','text-danger'); return;}
+  setMsg('Loading roster...');
+  $('submitBtn').disabled=true;
+  const r=await fetch(`/api/attendance/roster?class=${encodeURIComponent(cls)}&date=${encodeURIComponent(date)}&period=${encodeURIComponent(period)}`);
+  const d=await r.json();
+  if(!r.ok||!d.ok){setMsg(d.error||'Failed to load roster.','text-danger'); roster=[]; canMark=false; render(); return;}
+  roster=(d.students||[]).map(s=>({...s,status:s.status||'Absent',default_status:'Absent'}));
+  ctx={class:cls,date,period,cell:d.cell||{}};
+  canMark=true; $('submitBtn').disabled=false;
+  $('rosterTitle').textContent=`${cls} • ${date} • Period ${period} • ${d.cell?.display||d.cell?.subject||''}`;
+  setMsg(`Loaded ${roster.length} students. Default is Absent for all. ${d.note||''}`,'text-success');
+  render();
+});
+
+function setAll(status){roster.forEach(s=>s.status=status); render();}
+$('allPresent').addEventListener('click',()=>setAll('Present'));
+$('allAbsent').addEventListener('click',()=>setAll('Absent'));
+$('resetBtn').addEventListener('click',()=>{setAll('Absent'); setMsg('Reset all to Absent (default).','text-muted');});
+
+$('submitBtn').addEventListener('click', async ()=>{
+  if(!canMark||!ctx.class){setMsg('Load roster first.','text-danger'); return;}
+  if(!confirm(`Submit attendance for ${ctx.class} ${ctx.date} Period ${ctx.period}?`)) return;
+  $('submitBtn').disabled=true; setMsg('Submitting...');
+  const payload={class:ctx.class,date:ctx.date,period:ctx.period,marks:roster.map(s=>({student_id:s.id,status:s.status||'Absent'}))};
+  const r=await fetch('/api/attendance/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const d=await r.json();
+  if(!r.ok||!d.ok){setMsg(d.error||'Submit failed.','text-danger'); $('submitBtn').disabled=false; return;}
+  setMsg(`Submitted session #${d.session_id} (${d.subject||''}). Saved ${d.saved}, blocked ${d.blocked||0} (absent-lock/permission).`,'text-success');
+  $('submitBtn').disabled=false;
+});
+</script>
+</body>
+</html>

@@ -34,7 +34,7 @@ cctv_running = False
 cctv_stop_reason = 'Auto-marking disabled: use Staff Session draft->submit flow (Phase 3).'
 ALLOWED_VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.m4v', '.wmv'}
 MAX_OD_PROOF_MB = 50
-PROTOTYPE_MODE = True  # keep data non-permanent until explicitly finalized
+PROTOTYPE_MODE = False  # data persistent (per user confirmation)
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32).hex()
@@ -360,7 +360,7 @@ def student_dashboard():
 @app.route('/mark_attendance')
 @staff_required
 def mark_attendance_page():
-    return render_template('mark_attendance.html', user=_current_user(), prototype_notice='Auto-marking/sign-out disabled. Staff Session draft→review→submit (period-wise) will replace this in Phase 3.')
+    return redirect(url_for('take_attendance_page'))
 
 # ==============================================================================
 # STUDENTS / ADMIN
@@ -368,15 +368,20 @@ def mark_attendance_page():
 @app.route('/add_student', methods=['GET','POST'])
 @admin_required
 def add_student():
-    if request.method == 'GET': return render_template('add_student.html')
+    if request.method == 'GET': return render_template('add_student.html', classes=['24IIT5A','24IIT5B'])
     data = request.form
     name = _norm(data.get('name')); roll=_norm(data.get('roll')); cls=_norm(data.get('class')); sec=_norm(data.get('sec') or data.get('section'))
     reg_no=_upper(data.get('reg_no')); dob=_normalize_dob(data.get('dob'))
+    email=_norm(data.get('email')); phone=_norm(data.get('phone')); gender=_norm(data.get('gender')); blood=_norm(data.get('blood_group'))
+    guardian_name=_norm(data.get('guardian_name')); guardian_phone=_norm(data.get('guardian_phone')); address=_norm(data.get('address'))
     if not name: return jsonify({'error':'name required'}), 400
     if not reg_no or not dob: return jsonify({'error':'Register Number and DOB are required (student login = Reg No + DOB).'}), 400
     conn=_db(); c=conn.cursor()
-    c.execute('INSERT INTO students (name,roll,class,section,reg_no,dob,created_at) VALUES (?,?,?,?,?,?,?)',
-              (name,roll,cls,sec,reg_no,dob,datetime.datetime.utcnow().isoformat()))
+    for col in ['email','phone','gender','blood_group','guardian_name','guardian_phone','address']:
+        _ensure_column(c,'students',col,'TEXT')
+    c.execute('''INSERT INTO students (name,roll,class,section,reg_no,dob,email,phone,gender,blood_group,guardian_name,guardian_phone,address,created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+              (name,roll,cls,sec,reg_no,dob,email,phone,gender,blood,guardian_name,guardian_phone,address,datetime.datetime.utcnow().isoformat()))
     sid=c.lastrowid
     c.execute('SELECT id FROM users WHERE username=?',(reg_no,))
     if not c.fetchone():
@@ -415,13 +420,16 @@ def students_list():
 @admin_required
 def admin_students_page():
     conn=_db(); c=conn.cursor()
-    c.execute('SELECT id,name,roll,class,section,reg_no,created_at,dob FROM students ORDER BY id DESC')
+    for col in ['email','phone','guardian_name','guardian_phone','address','blood_group','gender']: _ensure_column(c,'students',col,'TEXT')
+    c.execute('SELECT id,name,roll,class,section,reg_no,created_at,dob,email,phone,guardian_name,guardian_phone,active FROM students ORDER BY class,name,id DESC')
     rows=c.fetchall(); conn.close()
     students=[]
     for r in rows:
         folder=os.path.join(DATASET_DIR,str(r[0])); img_count=0
         if os.path.isdir(folder): img_count=len([f for f in os.listdir(folder) if f.lower().endswith(('.jpg','.jpeg','.png'))])
-        students.append({'id':r[0],'name':r[1],'roll':r[2],'class':r[3],'section':r[4],'reg_no':r[5],'created_at':r[6],'dob':r[7],'image_count':img_count})
+        students.append({'id':r[0],'name':r[1],'roll':r[2],'class':r[3],'section':r[4],'reg_no':r[5],'created_at':r[6],'dob':r[7],
+                         'email':r[8] or '','phone':r[9] or '','guardian_name':r[10] or '','guardian_phone':r[11] or '',
+                         'active':r[12] if len(r)>12 else 1,'image_count':img_count})
     return render_template('students_list.html', students=students)
 
 @app.route('/student_photo/<int:sid>')
@@ -594,6 +602,313 @@ def api_timetables():
 @app.route('/api/me')
 @login_required
 def api_me(): return jsonify({'ok':True,'user':_current_user()})
+
+
+# ERP_MANUAL_ATTENDANCE
+DAY_KEYS=['MON','TUE','WED','THU','FRI','SAT','SUN']
+
+def _day_key(date_str):
+    try: return DAY_KEYS[datetime.date.fromisoformat(date_str).weekday()]
+    except Exception: return DAY_KEYS[datetime.datetime.utcnow().weekday()]
+
+def timetable_cell(class_name, date_str, period):
+    tt=load_timetable(class_name)
+    if not tt: return None
+    dk=_day_key(date_str)
+    sched=(tt.get('schedule') or {}).get(dk) or []
+    try: period=int(period)
+    except Exception: return None
+    for cell in sched:
+        if int(cell.get('period') or 0)==period:
+            slot=next((x for x in (tt.get('slots') or []) if int(x.get('period') or 0)==period), {})
+            out=dict(cell); out['day']=dk
+            out['time']=f"{slot.get('start','')}-{slot.get('end','')}" if slot else ''
+            out['label']=slot.get('label',''); return out
+    return None
+
+def _is_assigned_staff(class_name, date_str, period):
+    code=(session.get('staff_code') or session.get('username') or '').upper()
+    cell=timetable_cell(class_name,date_str,period)
+    if not cell or not code: return False
+    staff=[(x or '').upper() for x in (cell.get('staff') or [])]
+    return code in staff or bool(re.search(r'\b'+re.escape(code)+r'\b', (cell.get('display') or '').upper()))
+
+def can_mark_period(class_name, date_str, period):
+    role=session.get('role')
+    if role=='admin': return True,'Admin (universal)'
+    if session.get('is_hod'): return True,'HOD override'
+    if session.get('is_advisor') and session.get('advisor_class')==class_name: return True,'Class advisor (own class, full day)'
+    if _is_assigned_staff(class_name,date_str,period): return True,'Assigned/handling staff'
+    cell=timetable_cell(class_name,date_str,period)
+    disp=(cell or {}).get('display','')
+    return False,f"Not assigned: {disp} (only listed/handling staff for this period; advisor own-class full day; HOD/admin override)."
+
+def _student_photo_path(sid):
+    folder=os.path.join(DATASET_DIR,str(sid))
+    if not os.path.isdir(folder): return None
+    files=[f for f in os.listdir(folder) if f.lower().endswith(('.jpg','.jpeg','.png'))]
+    if not files: return None
+    files.sort(); return os.path.join(folder,files[-1])
+
+@app.route('/take_attendance')
+@staff_required
+def take_attendance_page():
+    return render_template('take_attendance.html', user=_current_user(), classes=['24IIT5A','24IIT5B'], today=datetime.date.today().isoformat())
+
+@app.route('/profile')
+@login_required
+def profile_page():
+    student=_resolve_student_for_user() if session.get('role')=='student' else None
+    staff=None
+    if session.get('role')!='student':
+        conn=_db(); c=conn.cursor(); c.execute('SELECT username,display_name,staff_code,role,is_hod,is_advisor,advisor_class,phone,email FROM users WHERE id=?',(session.get('user_id'),))
+        r=c.fetchone(); conn.close()
+        if r: staff={'username':r[0],'display_name':r[1],'staff_code':r[2],'role':r[3],'is_hod':r[4],'is_advisor':r[5],'advisor_class':r[6],'phone':r[7] if len(r)>7 else '','email':r[8] if len(r)>8 else ''}
+    return render_template('profile.html', user=_current_user(), student=student, staff=staff)
+
+@app.route('/api/profile/save', methods=['POST'])
+@login_required
+def api_profile_save():
+    data=request.get_json(silent=True) or {}
+    conn=_db(); c=conn.cursor(); uid=session.get('user_id'); role=session.get('role')
+    try:
+        if role=='student':
+            student=_resolve_student_for_user()
+            if not student: return jsonify({'ok':False,'error':'Student profile not linked'}), 404
+            for col in ['phone','email','address','guardian_name','guardian_phone','blood_group','gender']:
+                _ensure_column(c,'students',col,'TEXT')
+            c.execute('UPDATE students SET phone=?,email=?,address=?,guardian_name=?,guardian_phone=?,blood_group=?,gender=? WHERE id=?',
+                      ((data.get('phone') or '').strip(),(data.get('email') or '').strip(),(data.get('address') or '').strip(),
+                       (data.get('guardian_name') or '').strip(),(data.get('guardian_phone') or '').strip(),
+                       (data.get('blood_group') or '').strip(),(data.get('gender') or '').strip(),student[0]))
+        else:
+            for col in ['phone','email']: _ensure_column(c,'users',col,'TEXT')
+            c.execute('UPDATE users SET phone=?,email=? WHERE id=?',((data.get('phone') or '').strip(),(data.get('email') or '').strip(),uid))
+        newpw=(data.get('new_password') or '').strip()
+        if newpw:
+            if len(newpw)<4: conn.close(); return jsonify({'ok':False,'error':'Password too short (min 4)'}), 400
+            c.execute('UPDATE users SET password=? WHERE id=?',(_hash_pw(newpw),uid))
+        conn.commit(); return jsonify({'ok':True})
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+@app.route('/student_photo_safe/<int:sid>')
+@staff_required
+def student_photo_safe(sid):
+    p=_student_photo_path(sid)
+    if not p: abort(404)
+    return send_file(p, mimetype='image/jpeg')
+
+@app.route('/api/timetable/cell')
+@staff_required
+def api_timetable_cell():
+    cls=(request.args.get('class') or '').strip(); date=request.args.get('date') or datetime.date.today().isoformat(); period=request.args.get('period')
+    cell=timetable_cell(cls,date,period); ok,reason=can_mark_period(cls,date,period)
+    return jsonify({'ok':bool(cell),'class':cls,'date':date,'period':period,'day':_day_key(date),'cell':cell,'can_mark':ok,'access_reason':reason})
+
+@app.route('/api/attendance/roster')
+@staff_required
+def api_attendance_roster():
+    cls=(request.args.get('class') or '').strip(); date=request.args.get('date') or datetime.date.today().isoformat(); period=request.args.get('period')
+    ok,reason=can_mark_period(cls,date,period)
+    if not ok: return jsonify({'ok':False,'error':reason}), 403
+    try: period=int(period)
+    except Exception: return jsonify({'ok':False,'error':'Invalid period'}), 400
+    cell=timetable_cell(cls,date,period) or {}
+    disp=(cell.get('display') or cell.get('subject') or '').strip()
+    conn=_db(); c=conn.cursor()
+    c.execute('SELECT id FROM attendance_sessions WHERE class_name=? AND date=? AND period=? AND subject_display=?',(cls,date,period,disp))
+    sr=c.fetchone(); sess_id=sr[0] if sr else None
+    existing={}
+    if sess_id:
+        c.execute('SELECT student_id,status FROM attendance_entries WHERE session_id=?',(sess_id,))
+        for r in c.fetchall(): existing[int(r[0])]=(r[1] or 'Absent')
+    c.execute('SELECT id,name,roll,class,section,reg_no,dob,phone,email,guardian_name,guardian_phone FROM students WHERE upper(class)=upper(?) AND (active IS NULL OR active=1) ORDER BY roll, reg_no, name',(cls,))
+    rows=c.fetchall(); conn.close()
+    is_subject=_is_assigned_staff(cls,date,period)
+    students=[]
+    for r in rows:
+        st=existing.get(int(r[0]), 'Absent')
+        locked_absent = (st=='Absent') and (not is_subject) and (session.get('role')!='admin')
+        students.append({'id':r[0],'name':r[1],'roll':r[2],'class':r[3],'section':r[4],'reg_no':r[5],'dob':r[6],
+                         'phone':(r[7] if len(r)>7 else '') or '','email':(r[8] if len(r)>8 else '') or '',
+                         'guardian_name':(r[9] if len(r)>9 else '') or '','guardian_phone':(r[10] if len(r)>10 else '') or '',
+                         'photo_url':f'/student_photo_safe/{r[0]}' if _student_photo_path(r[0]) else None,
+                         'default_status':'Absent','status':st,'locked_absent':locked_absent,'session_id':sess_id})
+    return jsonify({'ok':True,'class':cls,'date':date,'period':int(period),'day':_day_key(date),'cell':cell,'students':students,
+                    'session_id':sess_id,'is_subject_staff':is_subject,
+                    'note':'Default Absent. If already marked Absent, only subject/handling staff (or Admin) can change it. Period OD may be assigned by assigned/consent staff for handled periods; day OD requires Advisor approval then HOD approval.'})
+
+@app.route('/api/attendance/submit', methods=['POST'])
+@staff_required
+def api_attendance_submit():
+    data=request.get_json(silent=True) or {}
+    cls=(data.get('class') or '').strip(); date=(data.get('date') or '').strip(); period=data.get('period'); marks=data.get('marks') or []
+    ok,reason=can_mark_period(cls,date,period)
+    if not ok: return jsonify({'ok':False,'error':reason}), 403
+    try: datetime.date.fromisoformat(date); period=int(period)
+    except Exception: return jsonify({'ok':False,'error':'Invalid date/period'}), 400
+    cell=timetable_cell(cls,date,period) or {}
+    disp=(cell.get('display') or (data.get('subject') or '')).strip(); subj=(cell.get('subject') or disp).strip()
+    marked_by=session.get('display_name') or session.get('username') or 'staff'; now=datetime.datetime.utcnow().isoformat()
+    is_subject=_is_assigned_staff(cls,date,period); is_admin=(session.get('role')=='admin')
+    conn=_db(); c=conn.cursor()
+    c.execute('SELECT id FROM attendance_sessions WHERE class_name=? AND date=? AND period=? AND subject_display=?',(cls,date,period,disp))
+    row=c.fetchone()
+    if row:
+        sess=row[0]; c.execute('UPDATE attendance_sessions SET subject=?,subject_display=?,staff_code=?,staff_name=?,status=?,source=?,submitted_at=?,notes=? WHERE id=?',
+                               (subj,disp,session.get('staff_code'),marked_by,'submitted','manual',now,(data.get('notes') or ''),sess))
+    else:
+        c.execute('INSERT INTO attendance_sessions (class_name,date,period,subject,subject_display,staff_code,staff_name,status,source,created_at,submitted_at,notes) VALUES (?,?,?,?,?,?,?, "submitted","manual",?,?,?)',
+                  (cls,date,period,subj,disp,session.get('staff_code'),marked_by,now,now,(data.get('notes') or '')))
+        sess=c.lastrowid
+    saved=0; blocked=0; details=[]
+    for m in marks:
+        try:
+            stid=int(m.get('student_id')); status=(m.get('status') or 'Absent').strip().upper()
+            status={'PRESENT':'Present','ABSENT':'Absent','OD':'OD','LATE':'Late'}.get(status,'Absent')
+            c.execute('SELECT status FROM attendance_entries WHERE session_id=? AND student_id=?',(sess,stid)); prev=c.fetchone(); prev_st=(prev[0] if prev else None)
+            if prev_st=='Absent' and status!='Absent' and not (is_subject or is_admin):
+                blocked += 1; details.append({'student_id':stid,'blocked':'Previously Absent: only subject/handling staff or Admin can change'}); continue
+            # Period OD allowed for assigned/handling staff (and advisor/HOD/admin context if they are marking this period) - stored as staff-issued period OD
+            c.execute('SELECT reg_no,name FROM students WHERE id=?',(stid,)); sr=c.fetchone(); reg=sr[0] if sr else ''; sname=sr[1] if sr else (m.get('name') or '')
+            c.execute("INSERT INTO attendance_entries (session_id,student_id,reg_no,student_name,status,confidence,flagged,source,marked_by,updated_at) VALUES (?,?,?,?,?,?,0,'manual',?,?) ON CONFLICT(session_id,student_id) DO UPDATE SET reg_no=excluded.reg_no,student_name=excluded.student_name,status=excluded.status,source=excluded.source,marked_by=excluded.marked_by,updated_at=excluded.updated_at",
+                      (sess,stid,reg,sname,status,None,marked_by,now))
+            if status=='OD':
+                # record period OD issued by handling staff (no proof required for handling staff)
+                c.execute('INSERT INTO od_records (request_id,student_id,reg_no,student_name,class_name,date,period,subject,status,issued_by,issued_role,created_at) VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?)',
+                          (stid,reg,sname,cls,date,period,disp,'OD',marked_by,session.get('role') or 'staff',now))
+            saved+=1
+        except Exception: pass
+    conn.commit(); conn.close()
+    return jsonify({'ok':True,'session_id':sess,'saved':saved,'blocked':blocked,'details':details,'class':cls,'date':date,'period':period,'subject':disp})
+
+
+
+# ERP_OD_WORKFLOW
+def _save_od_proof(file_storage):
+    if not file_storage or not file_storage.filename: return None,None
+    fname=secure_filename(file_storage.filename)
+    ext=os.path.splitext(fname)[1].lower()
+    save=f"od_{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{secrets.token_hex(4)}{ext or '.bin'}"
+    path=os.path.join(OD_PROOFS_DIR, save)
+    file_storage.save(path)
+    return path, fname
+
+@app.route('/od')
+@login_required
+def od_page():
+    role=session.get('role'); student=_resolve_student_for_user() if role=='student' else None
+    return render_template('od.html', user=_current_user(), student=student, classes=['24IIT5A','24IIT5B'], today=datetime.date.today().isoformat())
+
+@app.route('/api/od/request', methods=['POST'])
+@student_required
+def api_od_request():
+    student=_resolve_student_for_user()
+    if not student: return jsonify({'ok':False,'error':'Student profile not linked'}), 404
+    reason=(request.form.get('reason') or '').strip()
+    from_date=(request.form.get('from_date') or '').strip(); to_date=(request.form.get('to_date') or from_date).strip()
+    day_wise = 1 if (request.form.get('day_wise') in ('1','true','on','yes')) else 0
+    periods_json=(request.form.get('periods_json') or '').strip() or None
+    if not reason or not from_date: return jsonify({'ok':False,'error':'Reason and date are required'}), 400
+    proof_path, proof_name = _save_od_proof(request.files.get('proof'))
+    if day_wise and not proof_path:
+        return jsonify({'ok':False,'error':'Day OD requires proof/letter upload (max 50MB).'}), 400
+    now=datetime.datetime.utcnow().isoformat()
+    conn=_db(); c=conn.cursor()
+    c.execute("INSERT INTO od_requests (student_id,reg_no,student_name,class_name,from_date,to_date,periods_json,day_wise,reason,proof_path,proof_name,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'pending_advisor',?,?)",
+              (student[0], student[5], student[1], student[3], from_date, to_date, periods_json, day_wise, reason, proof_path, proof_name, now, now))
+    rid=c.lastrowid; conn.commit(); conn.close()
+    return jsonify({'ok':True,'request_id':rid,'status':'pending_advisor','message':'OD request submitted. Day OD: Advisor must approve, then HOD must approve. If rejected by advisor/HOD, OD is cancelled.'})
+
+@app.route('/api/od/my')
+@student_required
+def api_od_my():
+    student=_resolve_student_for_user()
+    if not student: return jsonify({'ok':True,'requests':[]})
+    conn=_db(); c=conn.cursor(); c.execute('SELECT id,from_date,to_date,day_wise,periods_json,reason,status,advisor_decision,advisor_note,hod_decision,hod_note,proof_name,created_at FROM od_requests WHERE student_id=? ORDER BY id DESC LIMIT 200',(student[0],))
+    rows=c.fetchall(); conn.close()
+    keys=['id','from_date','to_date','day_wise','periods_json','reason','status','advisor_decision','advisor_note','hod_decision','hod_note','proof_name','created_at']
+    return jsonify({'ok':True,'requests':[dict(zip(keys,r)) for r in rows]})
+
+def _od_scope_ok_for_user(req_class):
+    role=session.get('role')
+    if role=='admin' or session.get('is_hod'): return True
+    if session.get('is_advisor') and session.get('advisor_class')==req_class: return True
+    return False
+
+@app.route('/api/od/pending')
+@staff_required
+def api_od_pending():
+    role=session.get('role'); is_hod=bool(session.get('is_hod')); is_adv=bool(session.get('is_advisor')); adv_class=session.get('advisor_class')
+    conn=_db(); c=conn.cursor()
+    if role=='admin' or is_hod:
+        c.execute("SELECT id,student_id,reg_no,student_name,class_name,from_date,to_date,day_wise,periods_json,reason,status,proof_name,advisor_decision,advisor_note,hod_decision,hod_note,created_at FROM od_requests WHERE status IN ('pending_advisor','advisor_approved','pending_hod') ORDER BY id DESC LIMIT 300")
+    elif is_adv:
+        c.execute("SELECT id,student_id,reg_no,student_name,class_name,from_date,to_date,day_wise,periods_json,reason,status,proof_name,advisor_decision,advisor_note,hod_decision,hod_note,created_at FROM od_requests WHERE class_name=? AND status IN ('pending_advisor','advisor_approved') ORDER BY id DESC LIMIT 300",(adv_class,))
+    else:
+        conn.close(); return jsonify({'ok':True,'requests':[],'note':'Only class advisor/HOD/Admin can review day OD requests.'})
+    rows=c.fetchall(); conn.close()
+    keys=['id','student_id','reg_no','student_name','class_name','from_date','to_date','day_wise','periods_json','reason','status','proof_name','advisor_decision','advisor_note','hod_decision','hod_note','created_at']
+    return jsonify({'ok':True,'requests':[dict(zip(keys,r)) for r in rows],'can_review_hod':bool(role=='admin' or is_hod),'can_review_advisor':bool(is_adv or role=='admin' or is_hod)})
+
+def _apply_approved_od(conn, req):
+    c=conn.cursor(); now=datetime.datetime.utcnow().isoformat()
+    import datetime as dt
+    try:
+        d1=dt.date.fromisoformat(req['from_date']); d2=dt.date.fromisoformat(req['to_date'])
+    except Exception: return
+    cur=d1
+    while cur<=d2:
+        for per in range(1,8):
+            c.execute("INSERT INTO od_records (request_id,student_id,reg_no,student_name,class_name,date,period,subject,status,issued_by,issued_role,created_at) VALUES (?,?,?,?,?,?,?,?, 'OD',?,?,?)",
+                      (req['id'], req['student_id'], req['reg_no'], req['student_name'], req['class_name'], cur.isoformat(), per, 'DAY_OD', 'Advisor+HOD Approved', 'od_workflow', now))
+        cur += dt.timedelta(days=1)
+
+@app.route('/api/od/review', methods=['POST'])
+@staff_required
+def api_od_review():
+    data=request.get_json(silent=True) or {}
+    rid=data.get('request_id'); action=(data.get('action') or '').strip().lower(); note=(data.get('note') or '').strip()
+    if action not in ('advisor_approve','advisor_reject','hod_approve','hod_reject'): return jsonify({'ok':False,'error':'Invalid action'}), 400
+    conn=_db(); c=conn.cursor(); now=datetime.datetime.utcnow().isoformat()
+    c.execute('SELECT id,student_id,reg_no,student_name,class_name,from_date,to_date,day_wise,periods_json,reason,status,proof_path FROM od_requests WHERE id=?',(rid,))
+    row=c.fetchone()
+    if not row: conn.close(); return jsonify({'ok':False,'error':'Request not found'}), 404
+    keys=['id','student_id','reg_no','student_name','class_name','from_date','to_date','day_wise','periods_json','reason','status','proof_path']
+    req=dict(zip(keys,row))
+    if not _od_scope_ok_for_user(req['class_name']) and session.get('role')!='admin': conn.close(); return jsonify({'ok':False,'error':'Not authorized for this class/request'}), 403
+    is_hod=bool(session.get('is_hod')) or session.get('role')=='admin'; is_adv=bool(session.get('is_advisor')) or is_hod
+    st=req['status']
+    if action=='advisor_reject':
+        if not is_adv: conn.close(); return jsonify({'ok':False,'error':'Advisor/HOD/Admin only'}), 403
+        c.execute('UPDATE od_requests SET status="cancelled", advisor_code=?,advisor_decision="rejected",advisor_note=?,advisor_at=?,updated_at=? WHERE id=?',(session.get('staff_code') or session.get('username'), note, now, now, rid))
+    elif action=='advisor_approve':
+        if not (is_adv and (session.get('advisor_class')==req['class_name'] or is_hod or session.get('role')=='admin')): conn.close(); return jsonify({'ok':False,'error':'Only class advisor (own class), HOD, or Admin'}), 403
+        if st!='pending_advisor': conn.close(); return jsonify({'ok':False,'error':f'Cannot advisor-approve from status {st}'}), 400
+        c.execute('UPDATE od_requests SET status="advisor_approved", advisor_code=?,advisor_decision="approved",advisor_note=?,advisor_at=?,updated_at=? WHERE id=?',(session.get('staff_code') or session.get('username'), note, now, now, rid))
+    elif action=='hod_reject':
+        if not is_hod: conn.close(); return jsonify({'ok':False,'error':'HOD/Admin only'}), 403
+        c.execute('UPDATE od_requests SET status="cancelled", hod_code=?,hod_decision="rejected",hod_note=?,hod_at=?,updated_at=? WHERE id=?',(session.get('staff_code') or session.get('username'), note, now, now, rid))
+    elif action=='hod_approve':
+        if not is_hod: conn.close(); return jsonify({'ok':False,'error':'HOD/Admin only'}), 403
+        c.execute('SELECT status FROM od_requests WHERE id=?',(rid,)); st=c.fetchone()[0]
+        if st!='advisor_approved': conn.close(); return jsonify({'ok':False,'error':'Day OD requires Advisor approval first, then HOD approval. Current: '+st}), 400
+        c.execute('UPDATE od_requests SET status="od_approved", hod_code=?,hod_decision="approved",hod_note=?,hod_at=?,updated_at=? WHERE id=?',(session.get('staff_code') or session.get('username'), note, now, now, rid))
+        req['status']='od_approved'; _apply_approved_od(conn, req)
+    conn.commit(); conn.close()
+    return jsonify({'ok':True,'request_id':rid,'action':action})
+
+@app.route('/api/od/proof/<int:rid>')
+@staff_required
+def api_od_proof(rid):
+    conn=_db(); c=conn.cursor(); c.execute('SELECT class_name,proof_path,proof_name FROM od_requests WHERE id=?',(rid,)); r=c.fetchone(); conn.close()
+    if not r: abort(404)
+    if not _od_scope_ok_for_user(r[0]) and session.get('role')!='admin': abort(403)
+    if not r[1] or not os.path.exists(r[1]): abort(404)
+    return send_file(r[1], as_attachment=True, download_name=r[2] or os.path.basename(r[1]))
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')

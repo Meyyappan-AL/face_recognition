@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Student Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -12,45 +12,48 @@
   <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-4">
     <div class="container-fluid">
       <a class="navbar-brand fw-bold" href="/student_dashboard">Student Dashboard</a>
-      <a href="/logout" class="btn btn-danger btn-sm">Logout</a>
+      <div class="d-flex gap-2">
+        <a class="btn btn-outline-light btn-sm" href="/profile">My Profile</a>
+        <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
+      </div>
     </div>
   </nav>
-  <div class="container" style="max-width: 900px;">
+  <div class="container" style="max-width: 980px;">
     <div class="row g-3 mb-3">
-      <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="small text-muted">Days Present</div><div id="daysPresent" class="fs-4 fw-bold">-</div></div></div>
-      <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="small text-muted">Total IN Marks</div><div id="totalMarks" class="fs-4 fw-bold">-</div></div></div>
-      <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="small text-muted">Last OUT</div><div id="lastOut" class="small fw-semibold">-</div></div></div>
+      <div class="col-md-4"><div class="card p-3 shadow-sm glass-card"><div class="small text-muted">Reg No</div><div class="fs-6 fw-bold">{{ student_info.reg_no if student_info else '-' }}</div></div></div>
+      <div class="col-md-4"><div class="card p-3 shadow-sm glass-card"><div class="small text-muted">Class</div><div class="fs-6 fw-bold">{{ (student_info.class ~ ' ' ~ (student_info.section or '')) if student_info else '-' }}</div></div></div>
+      <div class="col-md-4"><div class="card p-3 shadow-sm glass-card"><div class="small text-muted">Attendance Note</div><div class="small">No exit required; missing exit never marks absent.</div></div></div>
     </div>
 
     <div class="card p-4 shadow-sm glass-card mb-3">
       <h5 class="mb-2">My Details</h5>
-      <div id="studentDetails" class="small text-muted">
+      <div class="small text-muted">
         {% if student_info %}
-          <strong>{{ student_info.name }}</strong> (ID {{ student_info.id }})<br>
-          Roll: {{ student_info.roll or '-' }} | Class: {{ student_info.class or '-' }} {{ student_info.section or '' }} | Reg: {{ student_info.reg_no or '-' }}
+          <strong>{{ student_info.name }}</strong><br>
+          Roll: {{ student_info.roll or '-' }} | Reg: {{ student_info.reg_no or '-' }} | DOB: {{ student_info.dob or '-' }} | Class: {{ student_info.class or '-' }} {{ student_info.section or '' }}
         {% else %}
-          Welcome, {{ session.get('username') }}. No linked student profile found — ask admin to add a student record matching your username/name/reg no.
+          Welcome, {{ session.get('username') }}. No linked student profile found — ask admin to add your record (Reg No + DOB).
         {% endif %}
       </div>
+      <div class="mt-2"><a class="btn btn-sm btn-outline-primary" href="/profile">Edit My Profile / Password</a></div>
     </div>
 
     <div class="card p-4 shadow-sm glass-card mb-3">
-      <h5 class="mb-3">My Attendance Activity</h5>
-      <div id="studentError" class="alert alert-warning small d-none"></div>
-      <ul id="personalNotificationList" class="list-group" style="max-height: 320px; overflow-y: auto;">
-        <li class="list-group-item text-muted small">Loading your records...</li>
+      <h5 class="mb-2">My Attendance</h5>
+      <p class="small text-muted mb-2">Period-wise submitted attendance will appear in reports (staff submits manual period roster; default Absent, Present only when marked). Legacy activity feed below if available.</p>
+      <ul id="personalNotificationList" class="list-group" style="max-height: 240px; overflow-y: auto;">
+        <li class="list-group-item text-muted small">Loading...</li>
       </ul>
+      <div id="studentError" class="small text-danger mt-2"></div>
     </div>
 
     <div class="card p-4 shadow-sm glass-card">
-      <h5 class="mb-2">OD Request (Prototype)</h5>
-      <p class="small text-muted mb-2">Request OD to your class advisor (proof upload, max 50MB). Advisor can approve/reject/forward to HOD. <strong>No exit is required</strong> and missing exit never marks you absent.</p>
-      <div class="alert alert-secondary small mb-0">OD request form + status tracking will be enabled in the next phase (advisor→HOD flow, period/day scope, proof upload).</div>
+      <h5 class="mb-2">OD Request</h5>
+      <p class="small text-muted mb-2">Request Day OD with proof (max 50MB). Flow: <strong>Advisor approval → HOD approval</strong> required; if advisor or HOD rejects, OD is cancelled. Period OD for class periods can be assigned by handling staff.</p>
+      <a class="btn btn-primary btn-sm" href="/od">Open OD Requests</a>
     </div>
   </div>
 </div>
 <script src="{{ url_for('static', filename='js/student_dashboard.js') }}"></script>
 </body>
 </html>
-
-

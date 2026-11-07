@@ -1,14 +1,18 @@
 ﻿__pycache__/
 *.pyc
-attendance.db
-*.db
+*.pkl
 model.pkl
 train_status.json
 dataset/
 uploads/
+uploads/od_proofs/
 .env
 .venv/
 venv/
 
-uploads/od_proofs/
+# Local runtime DB is persistent for this deployment; keep out of git by default.
+attendance.db
+*.db
+
+
 

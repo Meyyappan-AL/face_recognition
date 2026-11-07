@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>My Profile</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="main-container">
+  <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-3">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="/profile">My Profile</a>
+      <div class="d-flex gap-2 flex-wrap">
+        {% if session.get('role')=='student' %}<a class="btn btn-outline-light btn-sm" href="/student_dashboard">Dashboard</a>{% endif %}
+        {% if session.get('role') in ['staff','hod','admin'] %}<a class="btn btn-outline-light btn-sm" href="/staff_monitor">Dashboard</a>{% endif %}
+        {% if session.get('role')=='admin' %}<a class="btn btn-outline-light btn-sm" href="/">Admin</a>{% endif %}
+        <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container" style="max-width:920px">
+    <div class="row g-3">
+      <div class="col-lg-5">
+        <div class="card p-3 shadow-sm glass-card h-100">
+          <h5>Account Details</h5>
+          {% if student %}
+            <div class="small">
+              <div><strong>Name:</strong> {{ student[1] }}</div>
+              <div><strong>Reg No (Login):</strong> {{ student[5] or '-' }}</div>
+              <div><strong>DOB:</strong> {{ student[7] if student|length>7 and student[7] else '-' }}</div>
+              <div><strong>Roll:</strong> {{ student[2] or '-' }}</div>
+              <div><strong>Class:</strong> {{ student[3] or '-' }} {{ student[4] or '' }}</div>
+              <div class="text-muted mt-2">Identity/login fields (Reg No, DOB, name, class/roll) are managed by admin.</div>
+            </div>
+          {% elif staff %}
+            <div class="small">
+              <div><strong>Name:</strong> {{ staff.display_name }}</div>
+              <div><strong>Staff Code (Login):</strong> {{ staff.staff_code or staff.username }}</div>
+              <div><strong>Role:</strong> {{ staff.role }}{% if staff.is_hod %} / HOD{% endif %}{% if staff.is_advisor %} / Advisor {{ staff.advisor_class }}{% endif %}</div>
+              <div class="text-muted mt-2">Role, staff code, HOD/advisor flags are admin-managed.</div>
+            </div>
+          {% else %}
+            <div class="small text-muted">No profile details found.</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-lg-7">
+        <div class="card p-3 shadow-sm glass-card">
+          <h5>Edit Personal Details</h5>
+          <form id="profileForm">
+            {% if student %}
+              <div class="row g-2">
+                <div class="col-md-6"><label class="form-label small">Phone</label><input class="form-control form-control-sm" name="phone" value="{{ student[0] and '' }}"></div>
+                <div class="col-md-6"><label class="form-label small">Email</label><input class="form-control form-control-sm" name="email"></div>
+                <div class="col-md-6"><label class="form-label small">Guardian Name</label><input class="form-control form-control-sm" name="guardian_name"></div>
+                <div class="col-md-6"><label class="form-label small">Guardian Phone</label><input class="form-control form-control-sm" name="guardian_phone"></div>
+                <div class="col-md-4"><label class="form-label small">Gender</label><input class="form-control form-control-sm" name="gender"></div>
+                <div class="col-md-4"><label class="form-label small">Blood Group</label><input class="form-control form-control-sm" name="blood_group"></div>
+                <div class="col-12"><label class="form-label small">Address</label><textarea class="form-control form-control-sm" name="address" rows="2"></textarea></div>
+              </div>
+              <div class="small text-muted mt-2">Student can edit contact/guardian/personal fields only (prototype scope).</div>
+            {% else %}
+              <div class="row g-2">
+                <div class="col-md-6"><label class="form-label small">Phone</label><input class="form-control form-control-sm" name="phone" value="{{ staff.phone if staff else '' }}"></div>
+                <div class="col-md-6"><label class="form-label small">Email</label><input class="form-control form-control-sm" name="email" value="{{ staff.email if staff else '' }}"></div>
+              </div>
+            {% endif %}
+            <hr>
+            <label class="form-label small">New Password (optional)</label>
+            <input class="form-control form-control-sm" type="password" name="new_password" placeholder="Leave blank to keep current">
+            <div class="d-flex gap-2 mt-3">
+              <button class="btn btn-primary btn-sm" type="submit">Save Profile</button>
+            </div>
+            <div id="pmsg" class="small mt-2"></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+document.getElementById('profileForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const fd=new FormData(e.target); const payload=Object.fromEntries(fd.entries());
+  const msg=document.getElementById('pmsg'); msg.className='small mt-2 text-muted'; msg.textContent='Saving...';
+  const r=await fetch('/api/profile/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const d=await r.json().catch(()=>({}));
+  if(r.ok&&d.ok){msg.className='small mt-2 text-success'; msg.textContent='Saved.';}
+  else {msg.className='small mt-2 text-danger'; msg.textContent=d.error||'Save failed.';}
+});
+</script>
+</body>
+</html>

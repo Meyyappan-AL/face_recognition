@@ -11,10 +11,11 @@
   <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-4">
     <div class="container-fluid">
       <a class="navbar-brand fw-bold" href="/staff_monitor">Staff Dashboard</a>
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 flex-wrap">
         {% if session.get('role') == 'admin' %}<a class="btn btn-outline-light btn-sm" href="/">Admin</a>{% endif %}
-        <a class="btn btn-outline-light btn-sm" href="/mark_attendance">Mark Attendance</a>
+        <a class="btn btn-warning btn-sm" href="/take_attendance">Take Attendance</a>
         <a class="btn btn-outline-light btn-sm" href="/attendance_record">Records</a>
+        <a class="btn btn-outline-light btn-sm" href="/profile">My Profile</a>
         <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
       </div>
     </div>
@@ -26,45 +27,42 @@
         <div class="card p-3 shadow-sm glass-card mb-3">
           <h5>Staff / HOD Options</h5>
           <p class="small text-muted mb-1">Logged in as: <strong>{{ (user.display_name if user else session.get('display_name')) or session.get('username') }}</strong>{% if user and user.is_hod %} <span class="badge bg-danger">HOD</span>{% endif %}{% if user and user.is_advisor %} <span class="badge bg-primary">Advisor {{ user.advisor_class }}</span>{% endif %}</p>
-          <p class="small text-muted mb-2">Prototype Phase 1: sign-out/auto-mark removed. Next: Staff Session <strong>Class→Date→Period→Subject → video/webcam → draft → submit</strong>.</p>
+          <p class="small text-muted mb-2">Manual attendance: select classroom → date → period (timetable-restricted). Default <strong>Absent</strong>; mark Present explicitly. No camera, no exit/sign-out. Advisor has full-day access for own class only; HOD can override. Handling staff can mark OD for handled period(s) per policy.</p>
           <div class="d-grid gap-2">
-            <a class="btn btn-warning btn-sm" href="/mark_attendance">Staff Session (Phase 3 placeholder)</a>
-            <a class="btn btn-outline-primary btn-sm" href="/attendance_record?period=daily">Today’s Records</a>
+            <a class="btn btn-warning" href="/take_attendance">Take Attendance (Manual, Period-wise)</a>
+            <a class="btn btn-outline-primary btn-sm" href="/attendance_record?period=daily">Today's Records</a>
             <a class="btn btn-outline-secondary btn-sm" href="/attendance_record">All Records & CSV</a>
+            <a class="btn btn-outline-dark btn-sm" href="/profile">Edit My Profile / Password</a>
           </div>
         </div>
 
         <div class="card p-3 shadow-sm glass-card mb-3">
-          <h5>OD Actions (Phase 4)</h5>
-          <p class="small text-muted mb-0">Handling teacher can issue period OD; student requests go to class advisor (can reject/forward) → HOD for per-day/multi-scope as rules allow. Proof upload max 50MB.</p>
+          <h5>OD / Permissions</h5>
+          <p class="small text-muted mb-1">Period OD: handling/consent staff can assign OD for handled periods. Day OD: Advisor approves → HOD approves (if either rejects, cancelled). Proof required for day OD request.</p>
+          <a class="btn btn-outline-primary btn-sm w-100" href="/od">Open OD Requests / Review</a>
         </div>
 
         <div class="card p-3 shadow-sm glass-card">
-          <h5>Manual Attendance (transition)</h5>
-          <p class="small text-muted mb-2">Temporary per-day Present/Absent (period-session submission will replace this).</p>
-          <select id="manualStudent" class="form-select form-select-sm mb-2"><option value="">Loading students...</option></select>
-          <input id="manualDate" type="date" class="form-control form-control-sm mb-2">
-          <select id="manualStatus" class="form-select form-select-sm mb-2"><option value="Present">Present</option><option value="Absent">Absent</option></select>
-          <input id="manualNote" type="text" class="form-control form-control-sm mb-2" placeholder="Note (optional)">
-          <button id="manualSubmitBtn" type="button" class="btn btn-sm btn-primary w-100">Save Manual Attendance</button>
-          <div id="manualMsg" class="small mt-2"></div>
+          <h5>Quick Notes</h5>
+          <ul class="small mb-0">
+            <li>Multi-staff/lab cells: any listed staff can submit for the roster shown.</li>
+            <li>Option cells (PE/OE/H/TC) use timetable labels as-is.</li>
+            <li>Missing exit never marks absent.</li>
+          </ul>
         </div>
       </div>
 
       <div class="col-lg-7">
         <div class="card p-3 shadow-sm glass-card">
-          <h5 class="mb-3">Real-Time Attendance List</h5>
+          <h5 class="mb-3">Recent Attendance (legacy feed)</h5>
           <ul id="notificationList" class="list-group" style="max-height: 520px; overflow-y: auto;">
-            <li class="list-group-item text-muted">Connecting to the live feed...</li>
+            <li class="list-group-item text-muted">Loading...</li>
           </ul>
         </div>
       </div>
     </div>
   </div>
 </div>
-<script src="{{ url_for('static', filename='js/admin_dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='js/staff_monitor.js') }}"></script>
 </body>
 </html>
-
-
