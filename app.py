@@ -725,9 +725,10 @@ def _entry_exit_rows(period):
             if sid not in by_id: continue
             rec = by_id[sid]
             if ov["status"] == "Absent":
-                # explicit absent for that day in the selected range
                 if period == "daily":
                     rec["status"] = "Absent"; rec["first_in"] = None; rec["last_out"] = None
+                else:
+                    rec["status"] = "Absent"
                 rec["manual"] = f"Absent({ov['marked_by'] or 'manual'})"
             elif ov["status"] == "Present" and rec["status"] == "Absent":
                 rec["status"] = "Present (Manual)"; rec["manual"] = f"Present({ov['marked_by'] or 'manual'})"
