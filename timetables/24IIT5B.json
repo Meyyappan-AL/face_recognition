@@ -1,0 +1,75 @@
+﻿{
+  "class": "24IIT5B",
+  "hall": "202",
+  "class_advisor": {"name": "Ms. T. Kokilavani", "initials": "TK", "is_hod": false},
+  "slots": [
+    {"period": 1, "label": "Hour 1", "start": "09:00", "end": "09:45"},
+    {"period": 2, "label": "Hour 2", "start": "09:45", "end": "10:35"},
+    {"period": 3, "label": "Hour 3", "start": "10:50", "end": "11:40"},
+    {"period": 4, "label": "Hour 4", "start": "11:40", "end": "12:30"},
+    {"period": 5, "label": "Hour 5", "start": "13:20", "end": "14:15"},
+    {"period": 6, "label": "Hour 6", "start": "14:15", "end": "15:10"},
+    {"period": 7, "label": "Hour 7", "start": "15:20", "end": "16:15"}
+  ],
+  "breaks": [{"after_period": 2, "start": "10:35", "end": "10:50"}, {"after_period": 6, "start": "15:10", "end": "15:20"}],
+  "lunch": {"start": "12:30", "end": "13:20"},
+  "schedule": {
+    "MON": [
+      {"period":1,"subject":"CN","staff":["TN"],"display":"CN (TN)"},
+      {"period":2,"subject":"PE-I","staff":["ES","TK"],"display":"PE-I (ES, TK)","options":["22ITE22 - Service Oriented Architecture (ES)","22ITE61 - Knowledge Engineering (TK)"]},
+      {"period":3,"subject":"FLAT","staff":["KB"],"display":"FLAT (KB)"},
+      {"period":4,"subject":"OE-I","staff":["MS"],"display":"OE-I (MS)","options":["22BMO01 - Biometric Systems and their Applications (MS/BME)","22GEO01 - NCC Studies - I (BD/ECE)"]},
+      {"period":5,"subject":"ALR","staff":["CK"],"display":"ALR (CK)"},
+      {"period":6,"subject":"ALR","staff":["CK"],"display":"ALR (CK)"},
+      {"period":7,"subject":"PE-II","staff":["SM","VG"],"display":"PE-II (SM, VG)","options":["22ITE24 - UI and UX Design (SM)","22ITE62 - Soft Computing (VG)"]}
+    ],
+    "TUE": [
+      {"period":1,"subject":"FLAT","staff":["KB"],"display":"FLAT (KB)"},
+      {"period":2,"subject":"FSWD LAB","staff":["RM","PM","MR"],"display":"FSWD LAB (RM, PM, MR)","is_lab":true},
+      {"period":3,"subject":"FSWD LAB","staff":["RM","PM","MR"],"display":"FSWD LAB (RM, PM, MR)","is_lab":true},
+      {"period":4,"subject":"FSWD LAB","staff":["RM","PM","MR"],"display":"FSWD LAB (RM, PM, MR)","is_lab":true},
+      {"period":5,"subject":"OE-I","staff":["MS"],"display":"OE-I (MS)"},
+      {"period":6,"subject":"PE-II","staff":["SM","VG"],"display":"PE-II (SM, VG)"},
+      {"period":7,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"}
+    ],
+    "WED": [
+      {"period":1,"subject":"PE-I","staff":["ES","TK"],"display":"PE-I (ES, TK)"},
+      {"period":2,"subject":"CN","staff":["TN"],"display":"CN (TN)"},
+      {"period":3,"subject":"TC","staff":["RMW"],"display":"TC (RMW)"},
+      {"period":4,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"},
+      {"period":5,"subject":"JT","staff":["KN"],"display":"JT (KN)"},
+      {"period":6,"subject":"JT","staff":["KN"],"display":"JT (KN)"},
+      {"period":7,"subject":"FLAT","staff":["KB","TS"],"display":"FLAT (KB, TS)"}
+    ],
+    "THU": [
+      {"period":1,"subject":"PE-II","staff":["SM","VG"],"display":"PE-II (SM, VG)"},
+      {"period":2,"subject":"OE-I","staff":["MS"],"display":"OE-I (MS)"},
+      {"period":3,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"},
+      {"period":4,"subject":"FLAT","staff":["KB"],"display":"FLAT (KB)"},
+      {"period":5,"subject":"CN LAB","staff":["TN","SM","MK"],"display":"CN LAB (TN, SM, MK)","is_lab":true},
+      {"period":6,"subject":"CN LAB","staff":["TN","SM","MK"],"display":"CN LAB (TN, SM, MK)","is_lab":true},
+      {"period":7,"subject":"CN LAB","staff":["TN","SM","MK"],"display":"CN LAB (TN, SM, MK)","is_lab":true}
+    ],
+    "FRI": [
+      {"period":1,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"},
+      {"period":2,"subject":"TC","staff":["MV","RMY"],"display":"TC (MV / RMY)","options":["TC (MV)","TC (RMY)"]},
+      {"period":3,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"},
+      {"period":4,"subject":"PE-I","staff":["ES","TK"],"display":"PE-I (ES, TK)"},
+      {"period":5,"subject":"FLAT","staff":["KB"],"display":"FLAT (KB)"},
+      {"period":6,"subject":"CN","staff":["TN"],"display":"CN (TN)"},
+      {"period":7,"subject":"TC","staff":["MV"],"display":"TC (MV)"}
+    ],
+    "SAT": [
+      {"period":1,"subject":"CN","staff":["TN"],"display":"CN (TN)"},
+      {"period":2,"subject":"H1/TC","staff":["RMY","ES"],"display":"H1/TC (RMY / ES)","options":["H1 (RMY)","TC (ES)"]},
+      {"period":3,"subject":"PE-II","staff":["SM","VG"],"display":"PE-II (SM, VG)"},
+      {"period":4,"subject":"H2/TC","staff":["KB","TK"],"display":"H2/TC (KB / TK)","options":["H2 (KB)","TC (TK)"]},
+      {"period":5,"subject":"PE-I","staff":["ES","TK"],"display":"PE-I (ES, TK)"},
+      {"period":6,"subject":"OE-I","staff":["MS"],"display":"OE-I (MS)"},
+      {"period":7,"subject":"COUN","staff":["TK","TN","KG"],"display":"COUN (TK, TN, KG)"}
+    ]
+  },
+  "staff_directory": {
+    "TN":"Ms. T. Nithya","ES":"Ms. E. Sudha","TK":"Mr. T. Kokilavani","KB":"Ms. K. Baby","MS":"Mr. M. Sharmila","CK":"Ms. C. Kanimozhi","SM":"Ms. S. Mekala","VG":"Ms. V. Gomathi","RM":"Dr. R. Menaka","PM":"Ms. P. Malar","MR":"Ms. M. Ramya","RMW":"Ms. R. Maheshwari","KN":"Ms. K. Nevedha","TS":"Ms. T. Saranya","MK":"Dr. M. Kavitha","MV":"Ms. M. Vimala","RMY":"Dr. R. Mynavathi","KG":"Dr. K. Ganesh Kumar","BD":"Mr. B. Dinesh Kumar"
+  }
+}

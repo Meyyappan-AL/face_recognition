@@ -21,8 +21,8 @@
   </nav>
 
   <div class="container" style="max-width: 860px;">
-    <div class="alert alert-info small">
-      Temporary common attendance page (no CCTV setup now). Use <strong>Laptop Camera</strong> or upload a <strong>recorded video</strong> to mark IN automatically when a trained face is recognized. Student access is not allowed here.
+    <div class="alert alert-warning small">
+      {{ prototype_notice or 'Auto-marking/sign-out disabled (ERP prototype). This page will become the Staff Session flow: Class → Date → Period → Subject (as timetable) → upload 10–15s pan video/webcam → Draft (Present/Absent/OD/Flagged+confidence) → Review → Submit. No exit required; missing exit never marks absent.' }}
     </div>
     <div class="card p-4 shadow-sm glass-card">
       <h5 class="mb-3">Attendance Source</h5>

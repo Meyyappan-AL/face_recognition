@@ -30,10 +30,12 @@
               <div class="row g-2">
                 <div class="col-md-6"><input class="form-control" name="name" placeholder="Full Name" required></div>
                 <div class="col-md-3"><input class="form-control" name="roll" placeholder="Roll No."></div>
-                <div class="col-md-3"><input class="form-control" name="reg_no" placeholder="Registration No."></div>
-                <div class="col-md-6"><input class="form-control" name="class" placeholder="Class (e.g., '12th')"></div>
-                <div class="col-md-6"><input class="form-control" name="sec" placeholder="Section (e.g., 'A')"></div>
+                <div class="col-md-3"><input class="form-control" name="reg_no" placeholder="Register No. (login ID)" required></div>
+                <div class="col-md-3"><input class="form-control" type="date" name="dob" required title="DOB (student login password)"></div>
+                <div class="col-md-3"><input class="form-control" name="class" placeholder="Class (e.g., 24IIT5A)"></div>
+                <div class="col-md-3"><input class="form-control" name="sec" placeholder="Section"></div>
               </div>
+              <div class="small text-muted mt-1">Student login = Register Number + Date of Birth.</div>
               <div class="mt-3 d-flex gap-2 align-items-center">
                 <button id="saveInfoBtn" type="submit" class="btn btn-primary">1. Save Info</button>
                 <button id="startCaptureBtn" type="button" class="btn btn-warning" disabled>2. Start Capture (50)</button>

@@ -43,18 +43,13 @@
     </div>
 
     <div class="card p-4 shadow-sm glass-card">
-      <h5 class="mb-2">Sign Out (Mark Exit)</h5>
-      <p class="small text-muted">Use face recognition to record your exit (creates an OUT notification).</p>
-      <div class="text-center">
-        <video id="signOutVideo" width="320" height="240" autoplay muted style="border-radius:8px; border:2px solid #ccc; display:none; background:#f8f9fa;"></video>
-        <div id="signOutStatus" class="alert alert-secondary mt-2 small">Click the button to sign out by face.</div>
-      </div>
-      <button id="signOutBtn" class="btn btn-warning w-100 mt-2">Sign Out by Face</button>
+      <h5 class="mb-2">OD Request (Prototype)</h5>
+      <p class="small text-muted mb-2">Request OD to your class advisor (proof upload, max 50MB). Advisor can approve/reject/forward to HOD. <strong>No exit is required</strong> and missing exit never marks you absent.</p>
+      <div class="alert alert-secondary small mb-0">OD request form + status tracking will be enabled in the next phase (advisor→HOD flow, period/day scope, proof upload).</div>
     </div>
   </div>
 </div>
 <script src="{{ url_for('static', filename='js/student_dashboard.js') }}"></script>
-<script src="{{ url_for('static', filename='js/camera_signout.js') }}"></script>
 </body>
 </html>
 

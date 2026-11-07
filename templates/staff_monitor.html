@@ -24,33 +24,30 @@
     <div class="row g-4">
       <div class="col-lg-5">
         <div class="card p-3 shadow-sm glass-card mb-3">
-          <h5>Staff Options</h5>
-          <p class="small text-muted mb-2">Camera/video marking is on the common temporary page (no CCTV now).</p>
+          <h5>Staff / HOD Options</h5>
+          <p class="small text-muted mb-1">Logged in as: <strong>{{ (user.display_name if user else session.get('display_name')) or session.get('username') }}</strong>{% if user and user.is_hod %} <span class="badge bg-danger">HOD</span>{% endif %}{% if user and user.is_advisor %} <span class="badge bg-primary">Advisor {{ user.advisor_class }}</span>{% endif %}</p>
+          <p class="small text-muted mb-2">Prototype Phase 1: sign-out/auto-mark removed. Next: Staff Session <strong>Class→Date→Period→Subject → video/webcam → draft → submit</strong>.</p>
           <div class="d-grid gap-2">
-            <a class="btn btn-warning btn-sm" href="/mark_attendance">Open Mark Attendance</a>
-            <a class="btn btn-outline-primary btn-sm" href="/attendance_record?period=daily">Today’s Entry/Exit Report</a>
+            <a class="btn btn-warning btn-sm" href="/mark_attendance">Staff Session (Phase 3 placeholder)</a>
+            <a class="btn btn-outline-primary btn-sm" href="/attendance_record?period=daily">Today’s Records</a>
             <a class="btn btn-outline-secondary btn-sm" href="/attendance_record">All Records & CSV</a>
           </div>
         </div>
 
         <div class="card p-3 shadow-sm glass-card mb-3">
-          <h5>Manual Attendance</h5>
-          <p class="small text-muted mb-2">Mark any student Present or Absent for a day.</p>
+          <h5>OD Actions (Phase 4)</h5>
+          <p class="small text-muted mb-0">Handling teacher can issue period OD; student requests go to class advisor (can reject/forward) → HOD for per-day/multi-scope as rules allow. Proof upload max 50MB.</p>
+        </div>
+
+        <div class="card p-3 shadow-sm glass-card">
+          <h5>Manual Attendance (transition)</h5>
+          <p class="small text-muted mb-2">Temporary per-day Present/Absent (period-session submission will replace this).</p>
           <select id="manualStudent" class="form-select form-select-sm mb-2"><option value="">Loading students...</option></select>
           <input id="manualDate" type="date" class="form-control form-control-sm mb-2">
           <select id="manualStatus" class="form-select form-select-sm mb-2"><option value="Present">Present</option><option value="Absent">Absent</option></select>
           <input id="manualNote" type="text" class="form-control form-control-sm mb-2" placeholder="Note (optional)">
           <button id="manualSubmitBtn" type="button" class="btn btn-sm btn-primary w-100">Save Manual Attendance</button>
           <div id="manualMsg" class="small mt-2"></div>
-        </div>
-
-        <div class="card p-3 shadow-sm glass-card">
-          <h6 class="mb-2">Sign Out by Face</h6>
-          <div class="text-center">
-            <video id="signOutVideo" width="280" height="210" autoplay muted style="border-radius:8px; border:2px solid #eee; background:#f8f9fa; display:none;"></video>
-            <div id="signOutStatus" class="alert alert-secondary mt-2 small mb-2">Click to record your exit.</div>
-          </div>
-          <button id="signOutBtn" class="btn btn-warning w-100 btn-sm">Sign Out with My Face</button>
         </div>
       </div>
 
@@ -67,7 +64,6 @@
 </div>
 <script src="{{ url_for('static', filename='js/admin_dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='js/staff_monitor.js') }}"></script>
-<script src="{{ url_for('static', filename='js/camera_signout.js') }}"></script>
 </body>
 </html>
 
