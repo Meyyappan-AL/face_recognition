@@ -3,98 +3,129 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Facial Recognition Attendance</title>
+    <title>Login - VCET Attendance</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
-        /* Add specific styles for login page if they differ from main style.css */
-        body {
-            justify-content: center;
-            align-items: center;
-            padding: 1.5rem;
-        }
+        body { justify-content: center; align-items: center; padding: 1.5rem; }
+        .role-tabs { display:flex; gap:6px; margin-bottom:1rem; }
+        .role-tab { flex:1; border:1px solid #cbd5e1; background:#f8fafc; color:#334155; padding:.55rem .4rem; border-radius:.65rem; font-weight:600; font-size:.85rem; cursor:pointer; }
+        .role-tab.active { background:linear-gradient(90deg,#37476A,#5A6EAA); color:#fff; border-color:#37476A; box-shadow:0 4px 12px rgba(55,71,106,.18); }
+        .role-hint { font-size:.78rem; color:#64748b; margin:-.2rem 0 .75rem; }
     </style>
 </head>
 <body>
-    <div class="right-panel">
-        <div class="text-center mb-4">
+    <div class="right-panel" style="max-width:460px;">
+        <div class="text-center mb-3">
             <img src="{{ url_for('static', filename='images/vcet.jpg') }}" alt="Logo" style="height: 50px; border-radius: 8px;">
-            <h3 class="mt-3">System Login</h3>
-            <p class="text-muted">Digital Facial Recognition Attendance</p>
+            <h4 class="mt-3 mb-1">Attendance Portal Login</h4>
+            <p class="text-muted small mb-0">Velalar College of Engineering and Technology</p>
         </div>
 
-        <div id="alert" class="alert d-none"></div>
+        <div class="role-tabs" role="tablist" aria-label="Login role">
+            <button type="button" class="role-tab active" data-role="student">STUDENT</button>
+            <button type="button" class="role-tab" data-role="staff">STAFF</button>
+            <button type="button" class="role-tab" data-role="admin">ADMIN</button>
+        </div>
+        <div id="roleHint" class="role-hint">Student: use Register Number and Date of Birth.</div>
+        <div id="alert" class="alert d-none py-2 small"></div>
 
         <form id="loginForm">
-            <div class="form-floating mb-3">
-                <input type="text" class="form-control" id="username" placeholder="Username" required autocomplete="username">
-                <label for="username">Username</label>
+            <input type="hidden" id="loginRole" value="student">
+            <div id="studentFields">
+                <div class="form-floating mb-3">
+                    <input type="text" class="form-control" id="regNo" placeholder="Register Number" autocomplete="username">
+                    <label for="regNo">Register Number</label>
+                </div>
+                <div class="form-floating mb-3">
+                    <input type="date" class="form-control" id="dob" placeholder="Date of Birth">
+                    <label for="dob">Date of Birth</label>
+                </div>
             </div>
-
-            <div class="form-floating mb-3">
-                <input type="password" class="form-control" id="password" placeholder="Password" required autocomplete="current-password">
-                <label for="password">Password</label>
+            <div id="staffFields" style="display:none;">
+                <div class="form-floating mb-3">
+                    <input type="text" class="form-control" id="staffId" placeholder="User ID / Staff ID" autocomplete="username">
+                    <label for="staffId">User ID / Staff ID</label>
+                </div>
+                <div class="form-floating mb-3">
+                    <input type="password" class="form-control" id="staffPassword" placeholder="Password" autocomplete="current-password">
+                    <label for="staffPassword">Password</label>
+                </div>
             </div>
-
             <button type="submit" class="btn btn-primary w-100 py-2" id="loginBtn">Login</button>
         </form>
+        <div class="small text-muted mt-3">HODs sign in using the <strong>STAFF</strong> tab (HOD privileges apply automatically).</div>
     </div>
 
     <script>
         const loginForm = document.getElementById('loginForm');
         const loginBtn = document.getElementById('loginBtn');
         const alertDiv = document.getElementById('alert');
+        const loginRole = document.getElementById('loginRole');
+        const studentFields = document.getElementById('studentFields');
+        const staffFields = document.getElementById('staffFields');
+        const roleHint = document.getElementById('roleHint');
+        const hints = {
+            student: 'Student: use Register Number and Date of Birth.',
+            staff: 'Staff/HOD: use Staff ID and Password.',
+            admin: 'Admin: use Admin User ID and Password.'
+        };
+
+        document.querySelectorAll('.role-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.role-tab').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const role = btn.dataset.role;
+                loginRole.value = role;
+                roleHint.textContent = hints[role] || '';
+                const isStudent = role === 'student';
+                studentFields.style.display = isStudent ? '' : 'none';
+                staffFields.style.display = isStudent ? 'none' : '';
+                alertDiv.classList.add('d-none');
+            });
+        });
 
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const username = document.getElementById('username').value.trim();
-            const password = document.getElementById('password').value;
-
-            if (!username || !password) {
-                showAlert('Please enter both username and password.', 'danger');
-                return;
+            const roleTab = loginRole.value;
+            let payload = { role_tab: roleTab };
+            if (roleTab === 'student') {
+                payload.reg_no = document.getElementById('regNo').value.trim();
+                payload.dob = document.getElementById('dob').value;
+                // backward-compatible fields for older handlers
+                payload.username = payload.reg_no; payload.password = payload.dob;
+                if (!payload.reg_no || !payload.dob) return showAlert('Enter Register Number and Date of Birth.', 'danger');
+            } else {
+                payload.user_id = document.getElementById('staffId').value.trim();
+                payload.password = document.getElementById('staffPassword').value;
+                payload.username = payload.user_id;
+                if (!payload.user_id || !payload.password) return showAlert('Enter User ID and Password.', 'danger');
             }
 
             loginBtn.disabled = true;
-            loginBtn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Logging in...`;
-
+            loginBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Logging in...';
             try {
-                const response = await fetch('/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
+                const response = await fetch('/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const data = await response.json().catch(()=>({}));
+                if (response.ok && data.success) {
                     showAlert('Login successful! Redirecting...', 'success');
-                    // Redirect based on the role provided by the server
                     setTimeout(() => {
-                        if (data.role === 'admin') {
-                            window.location.href = '/';
-                        } else if (data.role === 'staff') {
-                            window.location.href = '/staff_monitor';
-                        } else if (data.role === 'student') {
-                            window.location.href = '/student_dashboard';
-                        } else {
-                            window.location.href = '/'; // Default fallback
-                        }
-                    }, 1000);
+                        if (data.role === 'admin') window.location.href = '/';
+                        else if (data.role === 'staff' || data.role === 'hod') window.location.href = '/staff_monitor';
+                        else window.location.href = '/student_dashboard';
+                    }, 700);
                 } else {
                     showAlert(data.message || 'Invalid credentials.', 'danger');
-                    loginBtn.disabled = false;
-                    loginBtn.textContent = 'Login';
+                    loginBtn.disabled = false; loginBtn.textContent = 'Login';
                 }
             } catch (error) {
                 showAlert('Connection error. Please try again.', 'danger');
-                loginBtn.disabled = false;
-                loginBtn.textContent = 'Login';
+                loginBtn.disabled = false; loginBtn.textContent = 'Login';
             }
         });
 
         function showAlert(message, type) {
-            alertDiv.className = `alert alert-${type}`;
+            alertDiv.className = `alert alert-${type} py-2 small`;
             alertDiv.textContent = message;
             alertDiv.classList.remove('d-none');
         }

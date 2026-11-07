@@ -9,3 +9,6 @@ uploads/
 .env
 .venv/
 venv/
+
+uploads/od_proofs/
+
