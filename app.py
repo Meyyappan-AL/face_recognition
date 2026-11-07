@@ -248,14 +248,67 @@ def process_frame_for_attendance(frame):
     except Exception as e:
         print(f"Error processing frame: {e}")
 
+def _open_capture(source, source_type):
+    """Open cv2.VideoCapture with Windows-friendly backend fallbacks for webcams."""
+    cap = None
+    if source_type == 'webcam':
+        try:
+            idx = int(source)
+        except Exception:
+            idx = 0
+        # On Windows, CAP_DSHOW/CAP_MSMF are often more reliable than default backend.
+        candidates = [
+            (idx, cv2.CAP_DSHOW),
+            (idx, cv2.CAP_MSMF),
+            (idx, 0),
+            (idx + 1, cv2.CAP_DSHOW),
+            (1, cv2.CAP_DSHOW),
+        ]
+        seen = set()
+        for s, backend in candidates:
+            key = (s, backend)
+            if key in seen: 
+                continue
+            seen.add(key)
+            try:
+                cap = cv2.VideoCapture(s, backend) if backend else cv2.VideoCapture(s)
+                if cap is not None and cap.isOpened():
+                    # warm-up read (some cameras need it)
+                    ok, _ = cap.read()
+                    if ok:
+                        print(f"[Camera] Opened webcam index {s} with backend {backend}.")
+                        return cap, s
+                if cap is not None:
+                    cap.release()
+            except Exception:
+                try:
+                    if cap is not None: cap.release()
+                except Exception:
+                    pass
+        return None, idx
+    # video file / RTSP
+    try:
+        cap = cv2.VideoCapture(source)
+    except Exception:
+        cap = None
+    if cap is not None and cap.isOpened():
+        return cap, source
+    try:
+        if cap is not None: cap.release()
+    except Exception:
+        pass
+    return None, source
+
+
 def cctv_processing_thread_target():
     """The main loop for the background thread that captures and processes frames."""
     global cctv_running, cctv_stop_reason, current_source, current_source_type
     source = current_source
     source_type = current_source_type
-    cap = cv2.VideoCapture(source)
-    if not cap.isOpened():
-        msg = f"Cannot open source: {source}."
+    cap, used_source = _open_capture(source, source_type)
+    if cap is None or not cap.isOpened():
+        hints = " Close apps using the camera (Zoom/Teams/Browser), check Windows camera privacy settings, and try camera index 1."
+        msg = f"Cannot open {source_type} source: {source}.{hints if source_type=='webcam' else ''}"
         print(f"ERROR: {msg}")
         cctv_stop_reason = msg
         cctv_running = False
@@ -263,17 +316,22 @@ def cctv_processing_thread_target():
     frame_skip = 10
     frame_count = 0
     cctv_stop_reason = ""
-    print(f"Processing started ({source_type}). Reading every {frame_skip}th frame. Source={source}")
+    print(f"Processing started ({source_type}). Reading every {frame_skip}th frame. Source={used_source}")
+    read_failures = 0
     while cctv_running:
         ret, frame = cap.read()
         if not ret:
+            read_failures += 1
             if source_type == 'video':
                 cctv_stop_reason = "Video processing completed."
                 print(cctv_stop_reason)
-            else:
-                cctv_stop_reason = "Stream ended or cannot read frames."
-                print(f"Source read failed. Stopping thread. ({source})")
-            break
+                break
+            if read_failures >= 30:
+                cctv_stop_reason = "Camera/stream stopped providing frames. Try a different camera index or reconnect."
+                print(f"Source read failed repeatedly. Stopping thread. ({used_source})")
+                break
+            continue
+        read_failures = 0
         frame_count += 1
         if frame_count % frame_skip == 0:
             try:
@@ -285,7 +343,10 @@ def cctv_processing_thread_target():
                 pass
             process_frame_for_attendance(frame)
             frame_count = 0
-    cap.release()
+    try:
+        cap.release()
+    except Exception:
+        pass
     if cctv_running:
         cctv_running = False
     if not cctv_stop_reason:
