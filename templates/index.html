@@ -1,135 +1,67 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Digital Attendance Dashboard</title>
-
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Admin Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  
-  <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-      font-family: 'Segoe UI', Tahoma, sans-serif;
-      background: url("static/images/bg.png") center/cover no-repeat;
-      /*display: flex;                 /* push content as one column 
-      justify-content: flex-end;
-      align-items: flex-start;*/
-    }
-
-    /* Right panel column */
-    .right-panel {
-      width: 100%;
-      max-width: 900px;              /* tighter max width */
-      padding: 2rem;
-      background: rgba(255,255,255,0.1);
-      overflow-y: auto;              /* scroll if tall */
-    }
-
-    /* Navbar gradient */
-    .nav-gradient {
-      background: linear-gradient(90deg,#0f172a,#3b82f6);
-      margin-bottom: 1.5rem;
-      border-radius: 0.75rem;
-    }
-
-    /* Cards */
-    .glass-card {
-      background: rgba(255, 255, 255, 0.92);
-      backdrop-filter: blur(6px);
-      border-radius: 16px;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-      transition: transform 0.2s ease;
-    }
-    .glass-card:hover { transform: translateY(-3px); }
-
-    /* Progress bar */
-    .progress {
-      background-color: #e9ecef;
-      border-radius: 10px;
-    }
-    .progress-bar {
-      background: linear-gradient(90deg, #3b82f6, #0ea5e9);
-      font-weight: 600;
-    }
-
-    /* Small screens: center panel */
-    @media (max-width: 992px) {
-      body { justify-content: center; }
-      .right-panel { max-width: 95vw; }
-    }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-
-  <div class="right-panel">
-    <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3">
-      <div class="container-fluid">
-        <a class="navbar-brand fw-bold" href="/">Digital Attendance</a>
-        <div class="d-flex">
-          <a class="btn btn-outline-light me-2" href="/add_student">Add Student</a>
-          <a class="btn btn-outline-light me-2" href="/admin/students">Students</a>
-          <a class="btn btn-outline-light me-2" href="/attendance_record">Records</a>
-          <a class="btn btn-danger" href="/logout">Logout</a>
+<div class="main-container">
+  <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-4">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="/">Digital Attendance — Admin</a>
+      <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-outline-light btn-sm" href="/add_student">Add Student</a>
+        <a class="btn btn-outline-light btn-sm" href="/admin/students">Students</a>
+        <a class="btn btn-outline-light btn-sm" href="/attendance_record">Records</a>
+        <a class="btn btn-outline-light btn-sm" href="/profile">My Profile</a>
+        <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
+      </div>
+    </div>
+  </nav>
+  <div class="container">
+    <div class="row g-4">
+      <div class="col-lg-4">
+        <div class="card p-3 shadow-sm glass-card mb-3">
+          <h5>Admin Controls</h5>
+          <p class="small text-muted">3-tab login: Student(Reg No+DOB), Staff, Admin. Admin cannot use Staff tab. HOD uses Staff tab with override. Manual period attendance is staff-led (timetable-restricted); advisor full-day for own class only.</p>
+          <div class="d-grid gap-2">
+            <a class="btn btn-primary" href="/add_student">Add Student (full details + photo)</a>
+            <a class="btn btn-outline-success" href="/admin/students">View/Edit Students</a>
+            <a class="btn btn-outline-secondary" href="/attendance_record">Records / CSV</a>
+          </div>
+        </div>
+        <div class="card p-3 shadow-sm glass-card">
+          <h5>Prototype Status</h5>
+          <ul class="small mb-0">
+            <li>Manual Take Attendance implemented: <code>/take_attendance</code> (staff) — default Absent, roster with photo/details, timetable access checks.</li>
+            <li>Data kept non-permanent until you confirm “keep permanent”.</li>
+            <li>Next: OD workflow (proof/approvals), richer reports/defaulters/exports, full edit forms.</li>
+          </ul>
         </div>
       </div>
-    </nav>
-
-    <!-- Dashboard Content -->
-    <!-- Use .container instead of container-fluid to avoid full-width stretch -->
-    <div class="container">
-      <div class="row g-4">
-        <div class="col-lg-4">
-          <div class="card p-3 shadow-sm glass-card mb-4">
-            <h5>Admin Controls</h5>
-            <p class="small text-muted">Prototype Phase 1: 3-tab login (Student/Staff/Admin), HOD/advisors seeded from timetable, student login = Reg No+DOB, auto-mark/sign-out disabled. Next: staff session draft→submit + OD + reports.</p>
-            <div class="d-grid gap-2">
-              <a class="btn btn-primary" href="/add_student">Add Student</a>
-              <a class="btn btn-outline-success" href="/admin/students">View Students</a>
-              <a class="btn btn-outline-warning" href="/mark_attendance">Open Mark Attendance</a>
-              <a class="btn btn-outline-secondary" href="/attendance_record">Records / Entry-Exit</a>
-            </div>
+      <div class="col-lg-8">
+        <div class="card p-3 shadow-sm glass-card mb-3">
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Train Model</h5>
+            <button id="trainBtn" class="btn btn-outline-primary btn-sm">Start Training</button>
           </div>
-
-          <div class="card p-3 shadow-sm glass-card">
-            <h5>Manual Attendance</h5>
-            <p class="small text-muted mb-2">Admin/staff can mark any student Present or Absent for a day.</p>
-            <select id="manualStudent" class="form-select form-select-sm mb-2"><option value="">Loading students...</option></select>
-            <input id="manualDate" type="date" class="form-control form-control-sm mb-2">
-            <select id="manualStatus" class="form-select form-select-sm mb-2"><option value="Present">Present</option><option value="Absent">Absent</option></select>
-            <input id="manualNote" type="text" class="form-control form-control-sm mb-2" placeholder="Note (optional)">
-            <button id="manualSubmitBtn" type="button" class="btn btn-sm btn-primary w-100">Save Manual Attendance</button>
-            <div id="manualMsg" class="small mt-2"></div>
+          <div class="mt-3">
+            <div class="progress" style="height:24px;"><div id="trainProgress" class="progress-bar" style="width:0%">0%</div></div>
+            <div id="trainMsg" class="mt-2 text-muted small">Used for future recognition flows (manual attendance works without camera now).</div>
           </div>
         </div>
-
-        <div class="col-lg-8">
-          <div class="card p-3 shadow-sm glass-card">
-            <div class="d-flex justify-content-between align-items-center">
-              <h5 class="mb-0">Train Model</h5>
-              <button id="trainBtn" class="btn btn-outline-primary">Start Training</button>
-            </div>
-            <div class="mt-3">
-              <div class="progress" style="height:28px;">
-                <div id="trainProgress" class="progress-bar" style="width:0%">0%</div>
-              </div>
-              <div id="trainMsg" class="mt-2 text-muted small">Model not trained yet.</div>
-            </div>
-          </div>
-
-          <div class="card p-3 shadow-sm mt-4 glass-card">
-            <h5>Attendance (Last 30 days)</h5>
-            <div class="chart-container" style="position:relative; height:320px; width:100%;">
-               <canvas id="attendanceChart"></canvas>
-            </div>
-          </div>
+        <div class="card p-3 shadow-sm glass-card">
+          <h5>Legacy Attendance (Last 30 days)</h5>
+          <div style="position:relative;height:300px;width:100%;"><canvas id="attendanceChart"></canvas></div>
         </div>
       </div>
     </div>
   </div>
-  <script src="{{ url_for('static', filename='js/admin_dashboard.js') }}"></script>
+</div>
+<script src="{{ url_for('static', filename='js/admin_dashboard.js') }}"></script>
 </body>
 </html>
