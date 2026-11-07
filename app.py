@@ -33,7 +33,9 @@ ALLOWED_VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.m4v', '.wmv'}
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
 # --- Session and Security Configuration ---
-app.secret_key = 'your_super_secret_key_change_this'
+# Use a fresh secret on each server start so stale browser sessions don't auto-redirect
+# (e.g., to staff page) after restart. For production, set a stable secret via env/config.
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32).hex()
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(hours=24)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -567,12 +569,16 @@ def login():
         else:
             return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
     
-    if 'logged_in' in session:
+    # Always show login page on GET unless explicitly continuing a valid session is desired.
+    # To avoid stale/role-redirect confusion on fresh server start, clear invalid sessions.
+    if request.args.get('force') == '1':
+        session.clear()
+    if 'logged_in' in session and session.get('role') in ('admin', 'staff', 'student'):
         role = session.get('role')
         if role == 'admin': return redirect(url_for('index'))
         if role == 'staff': return redirect(url_for('staff_monitor'))
         if role == 'student': return redirect(url_for('student_dashboard'))
-    
+        session.clear()
     return render_template('login.html')
 
 @app.route("/logout")
