@@ -1,0 +1,607 @@
+{% extends "base.html" %}
+{% block title %}Timetable Versions{% endblock %}
+{% block head %}
+  <style>
+    .tt-grid td{min-width:220px;vertical-align:top;padding:.35rem}
+    .tt-grid input,.tt-grid textarea{font-size:.74rem}
+    .tt-grid .cell-options{min-height:1.6rem}
+    .tt-cell{background:#f8fafc;border:1px solid #e2e8f0;border-radius:.5rem;padding:.3rem}
+    .tt-display{min-height:1rem;word-break:break-word}
+    .tt-chip{display:inline-flex;align-items:center;gap:.25rem;border:1px solid #e2e8f0;background:#f8fafc;border-radius:999px;padding:.15rem .5rem;font-size:.72rem;margin:0 .25rem .25rem 0}
+    .tt-slot-table input{font-size:.78rem}
+    .tt-history td,.tt-history th{vertical-align:middle;font-size:.78rem}
+    .tt-errors{max-height:180px;overflow:auto}
+    .tt-grid-wrap{max-height:62vh;overflow:auto}
+  </style>
+{% endblock %}
+{% block content %}
+  <div class="container-fluid px-0">
+    <div class="card erp-card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <h5 class="erp-section-title mb-1">Timetable Versions & Manual Editor</h5>
+          <div class="erp-muted">Upload the PDF/image reference, edit the grid, and save a date-effective version. The latest version mirrors <code>timetables/&lt;class&gt;.json</code>.</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+          <div>
+            <label class="form-label small mb-1" for="classSelect">Class</label>
+            <select id="classSelect" class="form-select form-select-sm" style="min-width:140px"></select>
+          </div>
+          <div>
+            <label class="form-label small mb-1" for="semesterSelect">Semester</label>
+            <select id="semesterSelect" class="form-select form-select-sm" style="min-width:160px">
+              {% for s in semesters %}<option value="{{ s.id }}" {% if s.is_current %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label small mb-1" for="effectiveFrom">Effective from</label>
+            <input id="effectiveFrom" type="date" class="form-control form-control-sm" value="{{ today }}">
+          </div>
+          <button id="loadBtn" class="btn btn-outline-primary btn-sm" type="button">Reload</button>
+          <button id="newBtn" class="btn btn-outline-dark btn-sm" type="button">New Class</button>
+        </div>
+      </div>
+      <div id="dirtyState" class="mt-2 small"><span class="badge bg-secondary">Not loaded</span></div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-12 col-xl-8">
+        <div class="card erp-card p-3 mb-3">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <div>
+              <h6 class="erp-section-title mb-1">Reference upload</h6>
+              <div class="erp-muted small">PDF or image only. The reference is attached to the saved version; it is not used for OCR.</div>
+            </div>
+            <span id="refBadge" class="badge bg-secondary">No reference</span>
+          </div>
+          <div class="row g-2 align-items-end">
+            <div class="col-md-7">
+              <input id="refFile" type="file" class="form-control form-control-sm" accept=".pdf,.png,.jpg,.jpeg,.webp">
+            </div>
+            <div class="col-md-3">
+              <button id="uploadRefBtn" class="btn btn-outline-primary btn-sm w-100" type="button">Upload reference</button>
+            </div>
+            <div class="col-md-2">
+              <a id="refLink" class="btn btn-outline-secondary btn-sm w-100 disabled" href="#" target="_blank" rel="noopener">View</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="card erp-card p-3">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <div>
+              <h6 class="erp-section-title mb-1">Manual grid</h6>
+              <div class="erp-muted small">Each cell uses <strong>subject</strong> + comma-separated <strong>staff codes</strong>. Separate elective options with <code>|</code>.</div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button id="validateBtn" class="btn btn-outline-primary btn-sm" type="button">Validate</button>
+              <button id="rawBtn" class="btn btn-outline-secondary btn-sm" type="button">Raw JSON</button>
+              <button id="downloadBtn" class="btn btn-outline-secondary btn-sm" type="button">Download</button>
+              <button id="saveBtn" class="btn btn-success btn-sm" type="button">Save version</button>
+            </div>
+          </div>
+
+          <div class="row g-2 mb-2">
+            <div class="col-md-3">
+              <label class="form-label small mb-1">Advisor initials</label>
+              <input id="advInitials" class="form-control form-control-sm" maxlength="12" placeholder="e.g. TK">
+            </div>
+            <div class="col-md-5">
+              <label class="form-label small mb-1">Advisor name</label>
+              <input id="advName" class="form-control form-control-sm" placeholder="e.g. Ms. T. Kokilavani">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small mb-1">Hall</label>
+              <input id="hallInput" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+              <div class="form-check">
+                <input id="advHod" class="form-check-input" type="checkbox">
+                <label class="form-check-label small" for="advHod">Advisor is HOD</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-responsive mb-2">
+            <table class="table table-sm tt-slot-table mb-0">
+              <thead><tr><th>Period</th><th>Label</th><th>Start</th><th>End</th><th></th></tr></thead>
+              <tbody id="slotRows"></tbody>
+            </table>
+          </div>
+          <button id="addSlotBtn" class="btn btn-outline-secondary btn-sm mb-3" type="button">Add period</button>
+
+          <div class="tt-grid-wrap border rounded">
+            <table class="table table-bordered mb-0 tt-grid">
+              <thead id="gridHead"></thead>
+              <tbody id="gridBody"></tbody>
+            </table>
+          </div>
+
+          <div class="row g-2 mt-1">
+            <div class="col-md-7">
+              <label class="form-label small mb-1">Staff directory</label>
+              <textarea id="staffDir" class="form-control form-control-sm" rows="4" spellcheck="false" placeholder="CODE = Full Name&#10;TN = Dr. T. Nandhini"></textarea>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label small mb-1">Version notes</label>
+              <textarea id="versionNotes" class="form-control form-control-sm" rows="4" placeholder="Reason for this version, e.g. Lab swapped from P5 to P6"></textarea>
+            </div>
+          </div>
+
+          <div id="rawWrap" class="mt-3 d-none">
+            <label class="form-label small mb-1">Raw JSON (advanced)</label>
+            <textarea id="rawText" class="form-control form-control-sm" rows="14" spellcheck="false" style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem"></textarea>
+            <button id="applyRawBtn" class="btn btn-outline-primary btn-sm mt-2" type="button">Apply JSON to grid</button>
+          </div>
+
+          <div id="errorBox" class="alert alert-danger mt-2 mb-0 small tt-errors d-none"></div>
+          <div id="warnBox" class="alert alert-warning mt-2 mb-0 small tt-errors d-none"></div>
+          <div id="msg" class="small text-muted mt-2">Select a class to begin.</div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-4">
+        <div class="card erp-card p-3 mb-3">
+          <h6 class="erp-section-title mb-2">Current version</h6>
+          <div id="versionBadge" class="small text-muted">No version loaded.</div>
+          <dl class="row small mb-0 mt-2" id="summary">
+            <dt class="col-5">Class</dt><dd class="col-7">-</dd>
+            <dt class="col-5">Advisor</dt><dd class="col-7">-</dd>
+            <dt class="col-5">Slots</dt><dd class="col-7">-</dd>
+            <dt class="col-5">Days</dt><dd class="col-7">-</dd>
+            <dt class="col-5">Cells</dt><dd class="col-7">-</dd>
+            <dt class="col-5">Options</dt><dd class="col-7">-</dd>
+          </dl>
+        </div>
+
+        <div class="card erp-card p-3 mb-3">
+          <h6 class="erp-section-title mb-2">Staff directory</h6>
+          <div id="staffChips" class="small text-muted">Load a timetable to view staff.</div>
+        </div>
+
+        <div class="card erp-card p-3">
+          <h6 class="erp-section-title mb-2">Classes</h6>
+          <div id="classChips" class="small text-muted">Loading...</div>
+          <hr>
+          <div class="erp-muted mb-2">Adding a class creates a JSON template. Fill it and save a version to activate it.</div>
+          <a class="btn btn-outline-secondary btn-sm w-100" href="/admin/settings">Back to ERP Settings</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card erp-card p-3 mt-3">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <h6 class="erp-section-title mb-0">Version history</h6>
+        <div class="erp-muted small">Restoring creates a new version effective from the selected date.</div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm tt-history align-middle mb-0">
+          <thead><tr><th>Ver</th><th>Effective</th><th>Status</th><th>Reference</th><th>Notes</th><th>Saved by</th><th></th></tr></thead>
+          <tbody id="versionRows"><tr><td colspan="7" class="text-muted">No versions loaded.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const DAY_KEYS=['MON','TUE','WED','THU','FRI','SAT'];
+  const INIT_CLASSES={{ classes|tojson }};
+  const INIT_SEMS={{ semesters|tojson }};
+  const TODAY={{ today|tojson }};
+  const state={class:'',semesterId:null,data:null,versionId:null,versions:[],
+               referencePath:'',referenceName:'',referenceUrl:'',notes:'',dirty:false,today:TODAY};
+  let classList=INIT_CLASSES.slice();
+
+  const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const attr=s=>esc(s).replace(/`/g,'&#96;');
+
+  function msg(t,type='muted'){
+    const e=$('msg'); e.className='small mt-2 text-'+(type==='danger'?'danger':type==='success'?'success':type==='warning'?'warning':'muted'); e.textContent=t;
+  }
+  function setDirty(v){
+    state.dirty=v;
+    $('dirtyState').innerHTML=v
+      ? `<span class="badge bg-warning text-dark">Unsaved changes</span> ${esc(state.class||'')}`
+      : `<span class="badge bg-success">Saved / loaded</span> ${esc(state.class||'')}`;
+  }
+  function showList(box,title,items,cls){
+    const el=$(box);
+    if(!items||!items.length){ el.classList.add('d-none'); el.innerHTML=''; return; }
+    el.className='alert '+cls+' mt-2 mb-0 small tt-errors';
+    el.innerHTML='<strong>'+esc(title)+'</strong><ul class="mb-0 mt-1 ps-3">'+items.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>';
+  }
+  function clearLists(){ showList('errorBox','',[],''); showList('warnBox','',[],''); }
+
+  function populateClasses(){
+    const sel=$('classSelect'); const current=state.class||sel.value;
+    sel.innerHTML=classList.map(c=>`<option value="${attr(c)}">${esc(c)}</option>`).join('') || '<option value="">No classes</option>';
+    if(current && classList.includes(current)) sel.value=current;
+  }
+  function currentSemesterId(){
+    const raw=$('semesterSelect').value;
+    return raw?Number(raw):(INIT_SEMS.find(s=>s.is_current)||{}).id||null;
+  }
+
+  function defaultSlots(){
+    return Array.from({length:7},(_,i)=>({period:i+1,label:'Hour '+(i+1),start:'',end:''}));
+  }
+  function slotFields(){
+    return Array.from($('slotRows').querySelectorAll('tr')).map(tr=>{
+      const p=tr.querySelector('.slot-period').value;
+      return {period:Number(p)||0,label:tr.querySelector('.slot-label').value.trim(),
+              start:tr.querySelector('.slot-start').value.trim(),end:tr.querySelector('.slot-end').value.trim()};
+    }).filter(s=>s.period>0);
+  }
+  function periods(){
+    const ps=slotFields().map(s=>s.period);
+    return ps.length?ps:Array.from({length:7},(_,i)=>i+1);
+  }
+  function cellFor(day,period){
+    const list=((state.data||{}).schedule||{})[day]||[];
+    return list.find(c=>Number(c.period)===Number(period))||null;
+  }
+
+  function renderSlots(slots){
+    $('slotRows').innerHTML=(slots.length?slots:defaultSlots()).map(s=>`
+      <tr>
+        <td style="width:90px"><input class="form-control form-control-sm slot-period" type="number" min="1" max="12" value="${attr(s.period||'')}"></td>
+        <td><input class="form-control form-control-sm slot-label" value="${attr(s.label||'')}"></td>
+        <td style="width:120px"><input class="form-control form-control-sm slot-start" type="time" value="${attr((s.start||'').slice(0,5))}"></td>
+        <td style="width:120px"><input class="form-control form-control-sm slot-end" type="time" value="${attr((s.end||'').slice(0,5))}"></td>
+        <td style="width:48px"><button class="btn btn-outline-danger btn-sm remove-slot" type="button" title="Remove period">&times;</button></td>
+      </tr>`).join('');
+  }
+
+  function renderGrid(){
+    const ps=periods();
+    $('gridHead').innerHTML='<tr><th>Day</th>'+ps.map(p=>`<th class="text-center">P${esc(p)}</th>`).join('')+'</tr>';
+    $('gridBody').innerHTML=DAY_KEYS.map(day=>{
+      const cells=ps.map(p=>{
+        const c=cellFor(day,p)||{};
+        const staff=Array.isArray(c.staff)?c.staff:[];
+        const options=Array.isArray(c.options)?c.options:[];
+        const display=c.display||((c.subject||'')+(staff.length?' ('+staff.join(', ')+')':''));
+        return `<td>
+          <div class="tt-cell" data-day="${day}" data-period="${p}">
+            <input class="form-control form-control-sm cell-subject" data-day="${day}" data-period="${p}" value="${attr(c.subject||'')}" placeholder="Subject">
+            <input class="form-control form-control-sm cell-staff mt-1" data-day="${day}" data-period="${p}" value="${attr(staff.join(', '))}" placeholder="Staff codes, e.g. TN, KB">
+            <input class="form-control form-control-sm cell-options mt-1" data-day="${day}" data-period="${p}" value="${attr(options.join(' | '))}" placeholder="Elective options (use |)">
+            <div class="tt-display small text-muted mt-1">${esc(display)}</div>
+          </div>
+        </td>`;
+      }).join('');
+      return `<tr><th class="align-middle">${day}</th>${cells}</tr>`;
+    }).join('');
+  }
+
+  function updateCellDisplay(td){
+    const subject=(td.querySelector('.cell-subject').value||'').trim();
+    const staff=(td.querySelector('.cell-staff').value||'').split(',').map(x=>x.trim()).filter(Boolean);
+    const display=subject+(staff.length?' ('+staff.join(', ')+')':'');
+    td.querySelector('.tt-display').textContent=display;
+  }
+
+  function collectData(){
+    const data=JSON.parse(JSON.stringify(state.data||{}));
+    data.class=state.class;
+    data.class_advisor=data.class_advisor||{};
+    data.class_advisor.initials=$('advInitials').value.trim();
+    data.class_advisor.name=$('advName').value.trim();
+    data.class_advisor.is_hod=$('advHod').checked;
+    data.hall=$('hallInput').value.trim();
+    data.slots=slotFields();
+    data.schedule=data.schedule||{};
+    const ps=periods();
+    DAY_KEYS.forEach(day=>{
+      const arr=[];
+      ps.forEach(p=>{
+        const td=$('gridBody').querySelector(`.tt-cell[data-day="${day}"][data-period="${p}"]`);
+        if(!td) return;
+        const subject=td.querySelector('.cell-subject').value.trim();
+        const staff=td.querySelector('.cell-staff').value.split(',').map(x=>x.trim()).filter(Boolean);
+        const options=td.querySelector('.cell-options').value.split('|').map(x=>x.trim()).filter(Boolean);
+        if(!subject && !staff.length && !options.length) return;
+        const cell={period:p,subject:subject,staff:staff,display:subject+(staff.length?' ('+staff.join(', ')+')':'')};
+        if(options.length) cell.options=options;
+        arr.push(cell);
+      });
+      data.schedule[day]=arr;
+    });
+    const staff={};
+    $('staffDir').value.split(/\r?\n/).forEach(line=>{
+      const t=line.trim(); if(!t) return;
+      const i=t.indexOf('=');
+      if(i>=0){ const k=t.slice(0,i).trim().toUpperCase(); const v=t.slice(i+1).trim(); if(k) staff[k]=v||k; }
+      else { const k=t.toUpperCase(); staff[k]=t; }
+    });
+    data.staff_directory=staff;
+    return data;
+  }
+
+  function renderSummary(data){
+    const adv=data.class_advisor||{};
+    const slots=Array.isArray(data.slots)?data.slots:[];
+    const sched=data.schedule||{};
+    const staff=data.staff_directory||{};
+    let optionCount=0,cellCount=0;
+    DAY_KEYS.forEach(d=>{ (sched[d]||[]).forEach(c=>{ cellCount++; if(Array.isArray(c.options)&&c.options.length) optionCount+=c.options.length; }); });
+    $('summary').innerHTML=`
+      <dt class="col-5">Class</dt><dd class="col-7">${esc(data.class||state.class||'-')}</dd>
+      <dt class="col-5">Advisor</dt><dd class="col-7">${esc(adv.name||'-')}${adv.initials?` <span class="badge bg-secondary">${esc(adv.initials)}</span>`:''}</dd>
+      <dt class="col-5">Slots</dt><dd class="col-7">${slots.length}</dd>
+      <dt class="col-5">Days</dt><dd class="col-7">${Object.keys(sched).filter(d=>(sched[d]||[]).length).length}</dd>
+      <dt class="col-5">Cells</dt><dd class="col-7">${cellCount}</dd>
+      <dt class="col-5">Options</dt><dd class="col-7">${optionCount}</dd>`;
+    $('staffChips').innerHTML=Object.entries(staff).map(([code,name])=>`<span class="tt-chip"><strong>${esc(code)}</strong> ${esc(name)}</span>`).join('') || '<span class="text-muted">No staff_directory entries.</span>';
+  }
+
+  function renderReference(){
+    const has=!!state.referenceName;
+    $('refBadge').className='badge '+(has?'bg-success':'bg-secondary');
+    $('refBadge').textContent=has?state.referenceName:'No reference';
+    const link=$('refLink');
+    if(has && (state.referenceUrl || state.versionId)){
+      link.classList.remove('disabled'); link.href=state.referenceUrl || ('/admin/timetable/reference/'+state.versionId);
+    } else { link.classList.add('disabled'); link.href='#'; }
+  }
+
+  function renderVersion(){
+    const v=state.versions.find(x=>Number(x.id)===Number(state.versionId));
+    const badge=$('versionBadge');
+    if(v){
+      const map={current:'bg-success',future:'bg-info text-dark',past:'bg-secondary'};
+      badge.innerHTML=`<span class="badge ${map[v.status]||'bg-secondary'}">${esc(v.status)}</span> v${esc(v.version_no)} <span class="text-muted">${esc(v.effective_from)} → ${esc(v.effective_to||'open')}</span>`;
+    } else if(state.data){
+      badge.innerHTML='<span class="badge bg-warning text-dark">legacy JSON</span> no saved version';
+    } else { badge.textContent='No version loaded.'; }
+  }
+
+  function renderHistory(){
+    if(!state.versions.length){ $('versionRows').innerHTML='<tr><td colspan="7" class="text-muted">No versions for this class/semester. Save one to start version history.</td></tr>'; return; }
+    const map={current:'bg-success',future:'bg-info text-dark',past:'bg-secondary'};
+    $('versionRows').innerHTML=state.versions.map(v=>`
+      <tr class="${Number(v.id)===Number(state.versionId)?'table-active':''}">
+        <td>v${esc(v.version_no)}</td>
+        <td>${esc(v.effective_from)}${v.effective_to?' → '+esc(v.effective_to):' → open'}</td>
+        <td><span class="badge ${map[v.status]||'bg-secondary'}">${esc(v.status)}</span></td>
+        <td>${v.reference_url?`<a href="${attr(v.reference_url)}" target="_blank" rel="noopener">${esc(v.reference_name||'View')}</a>`:'<span class="text-muted">-</span>'}</td>
+        <td class="text-muted">${esc(v.notes||'')}</td>
+        <td>${esc(v.created_by||'')}<div class="text-muted">${esc((v.created_at||'').slice(0,16))}</div></td>
+        <td class="text-nowrap">
+          <button class="btn btn-outline-primary btn-sm" data-load-version="${attr(v.id)}" type="button">Load</button>
+          <button class="btn btn-outline-secondary btn-sm" data-restore-version="${attr(v.id)}" type="button">Restore</button>
+        </td>
+      </tr>`).join('');
+  }
+
+  function renderEditor(){
+    const data=state.data||{};
+    const adv=data.class_advisor||{};
+    $('advInitials').value=adv.initials||'';
+    $('advName').value=adv.name||'';
+    $('advHod').checked=!!adv.is_hod;
+    $('hallInput').value=data.hall||'';
+    $('versionNotes').value=state.notes||'';
+    renderSlots(Array.isArray(data.slots)?data.slots:[]);
+    renderGrid();
+    $('staffDir').value=Object.entries(data.staff_directory||{}).map(([k,v])=>`${k} = ${v}`).join('\n');
+    renderSummary(collectData());
+    renderReference();
+    renderVersion();
+    setDirty(state.dirty);
+    if(!$('rawWrap').classList.contains('d-none')) $('rawText').value=JSON.stringify(collectData(),null,2);
+  }
+
+  async function loadVersions(cls,semId){
+    const d=await erp.fetchJSON(`/api/admin/timetable/versions?class=${encodeURIComponent(cls)}&semester_id=${encodeURIComponent(semId||'')}`);
+    state.versions=d.versions||[];
+    renderHistory();
+    return state.versions;
+  }
+
+  async function loadVersion(versionId){
+    const d=await erp.fetchJSON('/api/admin/timetable/versions/'+encodeURIComponent(versionId));
+    const v=d.version||{};
+    state.versionId=v.id;
+    state.data=v.data||{};
+    state.referencePath=v.reference_path||'';
+    state.referenceName=v.reference_name||'';
+    state.referenceUrl=v.reference_url||'';
+    state.notes=v.notes||'';
+    state.dirty=false;
+    renderEditor(); renderHistory(); clearLists();
+    msg('Loaded version v'+v.version_no+' ('+v.status+').','success');
+  }
+
+  async function loadLegacy(cls){
+    const d=await erp.fetchJSON('/api/admin/timetable/'+encodeURIComponent(cls));
+    state.versionId=null; state.referencePath=''; state.referenceName=''; state.referenceUrl=''; state.notes='';
+    state.data=d.data||JSON.parse(d.text||'{}');
+    state.dirty=false;
+    renderEditor(); renderHistory(); clearLists();
+    msg('Loaded legacy JSON. Save a version to start version history.','warning');
+  }
+
+  async function loadClass(cls){
+    if(!cls){ state.data=null; renderEditor(); return; }
+    if(state.dirty && !confirm('Discard unsaved changes and load '+cls+'?')){ $('classSelect').value=state.class; return; }
+    state.class=cls; state.versionId=null; state.semesterId=currentSemesterId();
+    $('classSelect').value=cls; msg('Loading '+cls+'...');
+    try{
+      clearLists();
+      await loadVersions(cls,state.semesterId);
+      const pick=state.versions.find(v=>v.status==='current')||state.versions[0];
+      if(pick) await loadVersion(pick.id); else await loadLegacy(cls);
+    }catch(e){ msg(e.message||'Could not load timetable.','danger'); erp.toast(e.message||'Load failed','danger'); }
+  }
+
+  async function validateData(){
+    if(!state.class) return false;
+    clearLists();
+    try{
+      const data=collectData();
+      const d=await erp.fetchJSON('/api/admin/timetable/'+encodeURIComponent(state.class)+'/validate',{method:'POST',body:{data:data}});
+      if(d.warnings&&d.warnings.length) showList('warnBox','Warnings',d.warnings,'alert-warning');
+      renderSummary(data); msg('Timetable is valid.','success');
+      return true;
+    }catch(e){
+      const data=e.data||{}; const errors=data.errors||[e.message||'Validation failed'];
+      showList('errorBox','Validation errors',errors,'alert-danger');
+      if(data.warnings&&data.warnings.length) showList('warnBox','Warnings',data.warnings,'alert-warning');
+      msg('Validation failed. Fix errors before saving.','danger');
+      return false;
+    }
+  }
+
+  async function saveVersion(){
+    if(!state.class){ msg('Select a class first.','danger'); return; }
+    if(!$('effectiveFrom').value){ msg('Choose an effective date.','danger'); return; }
+    if(!(await validateData())) return;
+    $('saveBtn').disabled=true; msg('Saving version and syncing staff...');
+    try{
+      const data=collectData();
+      const d=await erp.fetchJSON('/api/admin/timetable/versions',{method:'POST',body:{
+        class:state.class,semester_id:state.semesterId,effective_from:$('effectiveFrom').value,
+        data:data,reference_path:state.referencePath,reference_name:state.referenceName,
+        notes:$('versionNotes').value
+      }});
+      await loadVersions(state.class,state.semesterId);
+      await loadVersion(d.version_id);
+      if(d.warnings&&d.warnings.length) showList('warnBox','Saved with warnings',d.warnings,'alert-warning');
+      msg('Saved version v'+d.version_no+' for '+state.class+'. Staff sync: '+JSON.stringify(d.staff_sync||{}),'success');
+      erp.toast('Timetable version saved for '+state.class,'success');
+    }catch(e){
+      const data=e.data||{}; if(data.errors&&data.errors.length) showList('errorBox','Save errors',data.errors,'alert-danger');
+      msg(e.message||'Save failed.','danger'); erp.toast(e.message||'Save failed','danger');
+    }finally{ $('saveBtn').disabled=false; }
+  }
+
+  async function restoreVersion(id){
+    const v=state.versions.find(x=>Number(x.id)===Number(id));
+    if(!v) return;
+    if(!confirm(`Restore v${v.version_no} as a new version effective ${$('effectiveFrom').value}?`)) return;
+    try{
+      const d=await erp.fetchJSON('/api/admin/timetable/versions/'+encodeURIComponent(id)+'/restore',{method:'POST',body:{
+        effective_from:$('effectiveFrom').value,semester_id:state.semesterId,notes:'Restored v'+v.version_no
+      }});
+      await loadVersions(state.class,state.semesterId);
+      await loadVersion(d.version_id);
+      msg('Restored v'+v.version_no+' as v'+d.version_no+'.','success');
+    }catch(e){ msg(e.message||'Restore failed.','danger'); }
+  }
+
+  async function uploadReference(){
+    const f=$('refFile').files[0];
+    if(!f){ msg('Choose a PDF or image first.','danger'); return; }
+    if(!state.class){ msg('Select a class first.','danger'); return; }
+    const fd=new FormData(); fd.append('file',f); fd.append('class',state.class);
+    $('uploadRefBtn').disabled=true;
+    try{
+      const res=await fetch('/api/admin/timetable/reference',{method:'POST',body:fd,credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const d=await res.json();
+      if(!res.ok||!d.ok) throw new Error(d.error||'Upload failed.');
+      state.referencePath=d.reference_path; state.referenceName=d.reference_name; state.referenceUrl=d.reference_url;
+      setDirty(true); renderReference();
+      msg('Reference uploaded. Save the version to attach it.','success');
+    }catch(e){ msg(e.message||'Upload failed.','danger'); }
+    finally{ $('uploadRefBtn').disabled=false; }
+  }
+
+  async function createClass(){
+    const raw=prompt('New class name (letters/digits/._-, e.g. 24IIT5C):');
+    if(raw===null) return;
+    const cls=raw.trim().toUpperCase();
+    if(!cls){ msg('Class name is required.','danger'); return; }
+    if(!/^[A-Z0-9._-]{1,40}$/.test(cls)){ msg('Invalid class name. Use 1-40 letters/digits/._-','danger'); return; }
+    try{
+      await erp.fetchJSON('/api/admin/timetable/'+encodeURIComponent(cls)+'/create',{method:'POST',body:{}});
+      const d=await erp.fetchJSON('/api/admin/timetables');
+      classList=d.classes||classList; populateClasses(); $('classSelect').value=cls;
+      state.dirty=false; await loadClass(cls); setDirty(true);
+      msg('Template created for '+cls+'. Fill it in and save a version.','success');
+    }catch(e){ msg(e.message||'Could not create class.','danger'); }
+  }
+
+  function downloadJSON(){
+    try{
+      const data=collectData(); const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=(state.class||'timetable')+'.json';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    }catch(e){ msg('Cannot download: '+e.message,'danger'); }
+  }
+
+  $('slotRows').addEventListener('input',e=>{
+    setDirty(true);
+    if(e.target.classList.contains('slot-period')) renderGrid();
+    renderSummary(collectData());
+  });
+  $('slotRows').addEventListener('click',e=>{
+    if(!e.target.closest('.remove-slot')) return;
+    e.target.closest('tr').remove(); setDirty(true); renderGrid(); renderSummary(collectData());
+  });
+  $('addSlotBtn').addEventListener('click',()=>{
+    const ps=periods(); const next=Math.max(0,...ps)+1;
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="width:90px"><input class="form-control form-control-sm slot-period" type="number" min="1" max="12" value="${next}"></td>
+      <td><input class="form-control form-control-sm slot-label" value="Hour ${next}"></td>
+      <td style="width:120px"><input class="form-control form-control-sm slot-start" type="time"></td>
+      <td style="width:120px"><input class="form-control form-control-sm slot-end" type="time"></td>
+      <td style="width:48px"><button class="btn btn-outline-danger btn-sm remove-slot" type="button">&times;</button></td>`;
+    $('slotRows').appendChild(tr); setDirty(true); renderGrid();
+  });
+
+  $('gridBody').addEventListener('input',e=>{
+    const td=e.target.closest('.tt-cell'); if(!td) return;
+    if(e.target.classList.contains('cell-subject')||e.target.classList.contains('cell-staff')) updateCellDisplay(td);
+    setDirty(true); renderSummary(collectData());
+  });
+  $('advInitials').addEventListener('input',()=>{ setDirty(true); renderSummary(collectData()); });
+  $('advName').addEventListener('input',()=>{ setDirty(true); renderSummary(collectData()); });
+  $('advHod').addEventListener('change',()=>setDirty(true));
+  $('hallInput').addEventListener('input',()=>setDirty(true));
+  $('staffDir').addEventListener('input',()=>{ setDirty(true); renderSummary(collectData()); });
+  $('versionNotes').addEventListener('input',()=>setDirty(true));
+
+  $('rawBtn').addEventListener('click',()=>{
+    const wrap=$('rawWrap'); wrap.classList.toggle('d-none');
+    if(!wrap.classList.contains('d-none')) $('rawText').value=JSON.stringify(collectData(),null,2);
+  });
+  $('applyRawBtn').addEventListener('click',()=>{
+    try{
+      const data=JSON.parse($('rawText').value);
+      if(!data||typeof data!=='object') throw new Error('Top-level JSON must be an object.');
+      state.data=data; setDirty(true); renderEditor(); msg('Raw JSON applied to the grid.','success');
+    }catch(e){ msg('Cannot apply JSON: '+e.message,'danger'); }
+  });
+
+  $('versionRows').addEventListener('click',e=>{
+    const load=e.target.closest('[data-load-version]');
+    if(load){ state.dirty=false; loadVersion(load.dataset.loadVersion); return; }
+    const restore=e.target.closest('[data-restore-version]');
+    if(restore) restoreVersion(restore.dataset.restoreVersion);
+  });
+
+  $('loadBtn').addEventListener('click',()=>loadClass($('classSelect').value));
+  $('classSelect').addEventListener('change',()=>loadClass($('classSelect').value));
+  $('semesterSelect').addEventListener('change',()=>loadClass($('classSelect').value));
+  $('newBtn').addEventListener('click',createClass);
+  $('validateBtn').addEventListener('click',validateData);
+  $('saveBtn').addEventListener('click',saveVersion);
+  $('downloadBtn').addEventListener('click',downloadJSON);
+  $('uploadRefBtn').addEventListener('click',uploadReference);
+  window.addEventListener('beforeunload',e=>{ if(state.dirty){ e.preventDefault(); e.returnValue=''; } });
+
+  (async function init(){
+    populateClasses();
+    const classes=await (async()=>{ try{ const d=await erp.fetchJSON('/api/admin/timetables'); classList=d.classes||classList; return classList; }catch(_){ return classList; } })();
+    $('classChips').innerHTML=classes.length?classes.map(c=>`<span class="tt-chip">${esc(c)}</span>`).join(''):'<span class="text-muted">No classes yet.</span>';
+    populateClasses();
+    if(classes.length){ state.class=classes[0]; $('classSelect').value=classes[0]; await loadClass(classes[0]); }
+    else { msg('No timetables found. Create a class to start.','warning'); }
+  })();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Reports &amp; Analytics{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+{% block content %}
+  <div class="container-fluid px-0" style="max-width:1280px">
+    <div class="card erp-card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <div><h5 class="erp-section-title">Attendance insight filters</h5><div class="erp-muted" id="semesterNote">Select a semester or a custom date range.</div></div>
+        <div class="d-flex gap-2 flex-wrap">
+          <select id="fSemester" class="form-select form-select-sm" style="width:auto" title="Semester">
+            <option value="">All time</option>
+            {% for s in semesters %}<option value="{{ s.id }}" {% if s.id==current_semester_id %}selected{% endif %}>{{ s.label }}{% if s.start_date %} | {{ s.start_date }}{% endif %}{% if s.end_date %} to {{ s.end_date }}{% endif %}</option>{% endfor %}
+          </select>
+          <select id="fClass" class="form-select form-select-sm" style="width:auto"><option value="">All classes</option>{% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
+          <input type="date" id="fFrom" class="form-control form-control-sm" style="width:auto" title="From">
+          <input type="date" id="fTo" class="form-control form-control-sm" style="width:auto" title="To">
+          <select id="fAbsence" class="form-select form-select-sm" style="width:auto" title="Absence filter">
+            <option value="any">Any absence day</option>
+            <option value="full_day">Full-day absent only</option>
+            <option value="partial_day">Partial-day absent only</option>
+            <option value="period_wise">Period-wise absence</option>
+            <option value="none">No absence</option>
+          </select>
+          <button id="applyBtn" class="btn btn-primary btn-sm">Apply</button>
+        </div>
+      </div>
+      <div class="row g-2">
+        <div class="col-6 col-md-2"><div class="card erp-card p-2 erp-kpi"><div class="label">Students</div><div class="value" id="kStudents">-</div><div class="sub">in filter</div></div></div>
+        <div class="col-6 col-md-2"><div class="card erp-card p-2 erp-kpi"><div class="label">Attendance</div><div class="value" id="kPct">-</div><div class="sub">credited %</div></div></div>
+        <div class="col-6 col-md-2"><div class="card erp-card p-2 erp-kpi"><div class="label">Defaulters</div><div class="value text-danger" id="kDefaulters">-</div><div class="sub">&lt; <span id="kThreshold">75</span>%</div></div></div>
+        <div class="col-6 col-md-2"><div class="card erp-card p-2 erp-kpi"><div class="label">Absent periods</div><div class="value text-danger" id="kAbsent">-</div><div class="sub">matching filter</div></div></div>
+        <div class="col-6 col-md-2"><div class="card erp-card p-2 erp-kpi"><div class="label">Absent hours</div><div class="value text-danger" id="kAbsentHours">-</div><div class="sub">using slot duration</div></div></div>
+        <div class="col-6 col-md-2"><div class="card erp-card p-2 erp-kpi"><div class="label">OD / Late / Medical</div><div class="value" id="kMix">-</div><div class="sub">credited statuses</div></div></div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap mt-2">
+        <a class="btn btn-outline-primary btn-sm" href="/download_period_csv?period=all">Export all period CSV</a>
+        <a class="btn btn-outline-secondary btn-sm" href="/download_period_csv?period=monthly">Export last 30 days CSV</a>
+        <a class="btn btn-outline-danger btn-sm" href="/download_defaulters_csv">Export defaulters CSV</a>
+        <a id="recordsLink" class="btn btn-outline-secondary btn-sm" target="_blank" href="/attendance_record">Open Records</a>
+        {% if session.get('role')=='admin' %}<a class="btn btn-outline-dark btn-sm" href="/admin/settings">ERP Settings</a>{% endif %}
+      </div>
+      <div id="scopeNote" class="small text-muted mt-2"></div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-12 col-lg-4">
+        <div class="card erp-card p-3 h-100">
+          <h5 class="erp-section-title mb-2">Status distribution</h5>
+          <div style="position:relative;height:230px"><canvas id="statusChart"></canvas></div>
+          <div id="statusFallback" class="small text-muted text-center d-none">Chart unavailable; totals are shown in the table.</div>
+          <div class="row g-1 mt-2 small" id="statusLegend"></div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-8">
+        <div class="card erp-card p-3 h-100">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <div><h5 class="erp-section-title mb-0">Comparison</h5><div class="erp-muted">Percentage uses Present + Late + OD + Medical.</div></div>
+            <select id="fCompare" class="form-select form-select-sm" style="width:auto">
+              <option value="class">Class vs class</option>
+              {% if session.get('role')=='admin' %}<option value="staff">Staff vs staff</option><option value="period">Period vs period</option>{% endif %}
+              <option value="student">Student vs student</option>
+            </select>
+          </div>
+          <div style="position:relative;height:210px"><canvas id="compareChart"></canvas></div>
+          <div id="compareFallback" class="small text-muted text-center d-none">Chart unavailable; comparison rows are below.</div>
+          <div class="erp-table-wrap mt-2" style="max-height:260px">
+            <table class="table table-sm erp-table mb-0">
+              <thead><tr><th>Group</th><th>P</th><th>A</th><th>Late</th><th>OD</th><th>Medical</th><th>Absent hrs</th><th>%</th></tr></thead>
+              <tbody id="compareBody"><tr><td colspan="8" class="erp-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card erp-card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <div><h5 class="erp-section-title mb-0">Student attendance table</h5><div class="erp-muted" id="absenceNote">Absence filter applies to this table and comparison.</div></div>
+        <div class="d-flex gap-2 flex-wrap">
+          <input id="studentSearch" class="form-control form-control-sm" placeholder="Search student / reg no" style="max-width:240px">
+          <span class="badge bg-danger align-self-center" id="tableDefCount">0 defaulters</span>
+        </div>
+      </div>
+      <div class="erp-table-wrap" style="max-height:460px">
+        <table class="table table-sm erp-table mb-0">
+          <thead><tr><th>Student</th><th>Class</th><th>P</th><th>A</th><th>Late</th><th>OD</th><th>Medical</th><th>Full-day absences</th><th>Partial days</th><th>Absent hrs</th><th>%</th></tr></thead>
+          <tbody id="studentBody"><tr><td colspan="11" class="erp-empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-12 col-xl-6">
+        <div class="card erp-card p-3 h-100">
+          <h5 class="erp-section-title mb-2">Subject / Elective-wise</h5>
+          <div class="erp-table-wrap" style="max-height:320px">
+            <table class="table table-sm erp-table mb-0"><thead><tr><th>Class</th><th>Subject / Elective</th><th>Total</th><th>%</th></tr></thead><tbody id="subjBody"><tr><td colspan="4" class="erp-empty">Loading...</td></tr></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-xl-6">
+        <div class="card erp-card p-3 h-100">
+          <h5 class="erp-section-title mb-2">Submission compliance</h5>
+          <div class="erp-table-wrap" style="max-height:320px">
+            <table class="table table-sm erp-table mb-0"><thead><tr><th>Date</th><th>Class</th><th>Periods submitted</th></tr></thead><tbody id="compBody"><tr><td colspan="3" class="erp-empty">Loading...</td></tr></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const COLORS={present:'#16a34a',absent:'#dc2626',late:'#f59e0b',od:'#2563eb',medical:'#7c3aed',other:'#64748b'};
+  let statusChart=null, compareChart=null, students=[], defaulters=[];
+
+  function params(){
+    const p=new URLSearchParams();
+    if($('fSemester').value) p.set('semester_id',$('fSemester').value);
+    if($('fClass').value) p.set('class',$('fClass').value);
+    if($('fFrom').value) p.set('from',$('fFrom').value);
+    if($('fTo').value) p.set('to',$('fTo').value);
+    p.set('absence',$('fAbsence').value||'any');
+    p.set('compare',$('fCompare').value||'class');
+    return p;
+  }
+
+  function metricCells(r){
+    return `<td>${Number(r.present||0)}</td><td>${Number(r.absent||0)}</td><td>${Number(r.late||0)}</td><td>${Number(r.od||0)}</td><td>${Number(r.medical||0)}</td><td>${Number(r.absent_hours||0)}</td><td class="fw-bold ${Number(r.percentage||0)<Number($('kThreshold').textContent||75)?'text-danger':'text-success'}">${Number(r.percentage||0)}%</td>`;
+  }
+
+  function drawStatus(t){
+    const labels=['Present','Absent','Late','OD','Medical','Other'];
+    const keys=['present','absent','late','od','medical','other'];
+    const values=keys.map(k=>Number(t[k]||0));
+    const colors=keys.map(k=>COLORS[k]);
+    $('statusLegend').innerHTML=keys.map((k,i)=>`<div class="col-6"><span class="d-inline-block rounded-circle me-1" style="width:9px;height:9px;background:${colors[i]}"></span>${labels[i]}: <strong>${values[i]}</strong></div>`).join('');
+    if(!window.Chart){ $('statusFallback').classList.remove('d-none'); return; }
+    if(statusChart) statusChart.destroy();
+    statusChart=new Chart($('statusChart'),{type:'doughnut',data:{labels,datasets:[{data:values,backgroundColor:colors,borderWidth:1,borderColor:'#fff'}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}}}});
+  }
+
+  function drawCompare(rows){
+    if(!window.Chart){ $('compareFallback').classList.remove('d-none'); return; }
+    if(compareChart) compareChart.destroy();
+    const shown=rows.slice(0,12);
+    compareChart=new Chart($('compareChart'),{type:'bar',data:{labels:shown.map(r=>r.label||r.key),datasets:[{label:'Attendance %',data:shown.map(r=>Number(r.percentage||0)),backgroundColor:shown.map(r=>Number(r.percentage||0)<Number($('kThreshold').textContent||75)?'#dc2626':'#2563eb'),borderRadius:4}]},
+      options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',scales:{x:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}},y:{ticks:{font:{size:10}}}},plugins:{legend:{display:false}}}});
+  }
+
+  function renderComparison(rows){
+    $('compareBody').innerHTML=rows.length?rows.map(r=>`<tr><td><div class="fw-semibold">${esc(r.label||r.key)}</div><div class="small text-muted">${esc(r.sub||'')}</div></td>${metricCells(r)}</tr>`).join(''):'<tr><td colspan="8" class="erp-empty">No comparison rows for this filter.</td></tr>';
+    drawCompare(rows);
+  }
+
+  function renderStudents(){
+    const q=($('studentSearch').value||'').trim().toLowerCase();
+    const rows=students.filter(s=>!q || [s.name,s.reg_no,s.class].join(' ').toLowerCase().includes(q));
+    $('studentBody').innerHTML=rows.length?rows.map(s=>`<tr class="${s.defaulter?'table-danger':''}"><td><div class="fw-semibold">${esc(s.name||'-')}</div><div class="small text-muted">${esc(s.reg_no||'')}</div></td><td>${esc(s.class||'')}</td><td>${Number(s.present||0)}</td><td>${Number(s.absent||0)}</td><td>${Number(s.late||0)}</td><td>${Number(s.od||0)}</td><td>${Number(s.medical||0)}</td><td>${Number(s.full_day_absences||0)}</td><td>${Number(s.partial_day_absences||0)}</td><td>${Number(s.absent_hours||0)}</td><td class="fw-bold ${s.defaulter?'text-danger':'text-success'}">${Number(s.percentage||0)}%</td></tr>`).join(''):'<tr><td colspan="11" class="erp-empty">No students match this filter.</td></tr>';
+  }
+
+  async function load(){
+    const p=params();
+    $('compareBody').innerHTML='<tr><td colspan="8" class="erp-empty">Loading...</td></tr>';
+    $('studentBody').innerHTML='<tr><td colspan="11" class="erp-empty">Loading...</td></tr>';
+    $('subjBody').innerHTML='<tr><td colspan="4" class="erp-empty">Loading...</td></tr>';
+    $('compBody').innerHTML='<tr><td colspan="3" class="erp-empty">Loading...</td></tr>';
+    try{
+      const [ins, ov] = await Promise.all([
+        fetch('/api/analytics/insights?'+p.toString()).then(r=>r.json()),
+        fetch('/api/analytics/overview?'+p.toString()).then(r=>r.json())
+      ]);
+      if(!ins.ok) throw new Error(ins.error||'Insights failed');
+      const sem=ins.semester||{}; const range=ins.range||{};
+      $('semesterNote').textContent=(sem.label||'Current semester')+(range.from?(' | '+range.from+' to '+(range.to||'...')):'');
+      $('scopeNote').textContent=(ins.note||'')+' Absence filter: '+($('fAbsence').selectedOptions[0].textContent||'Any')+'.';
+      $('kThreshold').textContent=ins.threshold??75;
+      const t=ins.totals||{};
+      students=ins.students||[]; defaulters=ins.defaulters||[];
+      $('kStudents').textContent=students.length;
+      $('kPct').textContent=(Number(t.percentage||0))+'%';
+      $('kDefaulters').textContent=defaulters.length;
+      $('kAbsent').textContent=Number(t.absent||0);
+      $('kAbsentHours').textContent=Number(t.absent_hours||0);
+      $('kMix').textContent=`${Number(t.od||0)} / ${Number(t.late||0)} / ${Number(t.medical||0)}`;
+      $('tableDefCount').textContent=defaulters.length+' defaulters';
+      drawStatus(t);
+      renderComparison((ins.comparison||{}).rows||[]);
+      renderStudents();
+      if(ov.ok){
+        const subj=ov.subjects||[]; $('subjBody').innerHTML=subj.length?subj.map(s=>`<tr><td>${esc(s.class)}</td><td>${esc(s.subject||'-')}</td><td>${s.total}</td><td>${s.percentage}%</td></tr>`).join(''):'<tr><td colspan="4" class="erp-empty">No subject data.</td></tr>';
+        const comp=ov.compliance||[]; $('compBody').innerHTML=comp.length?comp.map(c=>`<tr><td>${esc(c.date)}</td><td>${esc(c.class)}</td><td>${c.submitted_periods}</td></tr>`).join(''):'<tr><td colspan="3" class="erp-empty">No sessions.</td></tr>';
+      }else{
+        $('subjBody').innerHTML='<tr><td colspan="4" class="text-danger small">'+esc(ov.error||'Overview failed')+'</td></tr>';
+        $('compBody').innerHTML='<tr><td colspan="3" class="text-danger small">'+esc(ov.error||'Overview failed')+'</td></tr>';
+      }
+      const qs=new URLSearchParams();
+      if($('fClass').value) qs.set('class',$('fClass').value);
+      if($('fSemester').value) qs.set('semester_id',$('fSemester').value);
+      if($('fAbsence').value && $('fAbsence').value!=='any') qs.set('absence',$('fAbsence').value);
+      $('recordsLink').href='/attendance_record'+(qs.toString()?'?'+qs.toString():'');
+    }catch(e){
+      $('compareBody').innerHTML='<tr><td colspan="8" class="text-danger small">'+esc(e.message||'Load failed')+'</td></tr>';
+      $('studentBody').innerHTML='<tr><td colspan="11" class="text-danger small">'+esc(e.message||'Load failed')+'</td></tr>';
+    }
+  }
+
+  $('applyBtn').addEventListener('click', load);
+  $('fCompare').addEventListener('change', load);
+  $('fSemester').addEventListener('change', ()=>{ $('fFrom').value=''; $('fTo').value=''; load(); });
+  $('studentSearch').addEventListener('input', renderStudents);
+  load();
+})();
+</script>
+{% endblock %}

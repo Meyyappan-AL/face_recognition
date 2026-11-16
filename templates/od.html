@@ -1,39 +1,43 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>OD / On-Duty</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-<div class="main-container">
-  <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-3">
-    <div class="container-fluid">
-      <a class="navbar-brand fw-bold" href="/od">OD / On-Duty</a>
-      <div class="d-flex gap-2 flex-wrap">
-        {% if session.get('role')=='student' %}<a class="btn btn-outline-light btn-sm" href="/student_dashboard">Dashboard</a>{% endif %}
-        {% if session.get('role') in ['staff','hod','admin'] %}<a class="btn btn-outline-light btn-sm" href="/staff_monitor">Dashboard</a>{% endif %}
-        <a class="btn btn-outline-light btn-sm" href="/profile">Profile</a>
-        <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
-      </div>
-    </div>
-  </nav>
+{% extends "base.html" %}
+{% block title %}OD / On-Duty{% endblock %}
+{% block head %}
+  <style>.scope-box{display:none}.pill{font-size:.75rem}</style>
+{% endblock %}
+{% block content %}
   <div class="container" style="max-width:1100px">
-    <div class="alert alert-secondary small">OD rules: <strong>Period OD</strong> for class periods — consent/handling staff can assign OD for handled periods. <strong>Day OD</strong> — request goes to <strong>class advisor</strong> first; if advisor approves, <strong>HOD</strong> must approve; only then OD is considered. If advisor or HOD rejects, OD is cancelled. Day OD requires proof/letter (max 50MB).</div>
+    <div class="alert alert-secondary small">
+      <strong>OD rules:</strong>
+      <ul class="mb-0 ps-3">
+        <li><strong>Direct period OD (single/handled periods):</strong> the <strong>assigned/handling (consent) staff for that timetable period</strong> can assign OD directly in <em>Take Attendance</em>. Advisor/HOD are not disturbed.</li>
+        <li><strong>Student OD request (Full day / Half day / Specific periods):</strong> no submission time regulation. Request â†’ <strong>Class Advisor approves</strong> â†’ <strong>HOD final approval</strong>. If not fully approved by <strong>6:00 PM IST on the last OD date</strong> (range uses last date), it is <strong>auto-rejected (Advisor rejected, HOD = NIL)</strong>. If Advisor/HOD rejects, OD is cancelled. Final approval auto-marks OD per scope. <strong>HOD may cancel approved OD until the OD period is over</strong> (OD effect removed; default Absent restored except explicit Present by camera/staff).</li>
+        <li><strong>Half day:</strong> Periods 1&ndash;4 or 5&ndash;7. You may also select specific periods. <strong>Full day:</strong> marks OD for all periods 1&ndash;7 on approved date(s). <strong>Proof upload is optional.</strong> Rejection message (if provided) is shown to the student. Admin is not involved in OD approval.</li>
+      </ul>
+    </div>
 
     {% if session.get('role')=='student' %}
     <div class="card p-3 shadow-sm glass-card mb-3">
-      <h5>Request Day OD (Advisor → HOD)</h5>
+      <h5>Request OD (Advisor to HOD approval)</h5>
       <form id="odForm">
         <div class="row g-2">
           <div class="col-md-3"><label class="form-label small">From Date *</label><input class="form-control form-control-sm" type="date" name="from_date" value="{{ today }}" required></div>
           <div class="col-md-3"><label class="form-label small">To Date</label><input class="form-control form-control-sm" type="date" name="to_date" value="{{ today }}"></div>
-          <div class="col-md-3"><label class="form-label small">Scope</label><select class="form-select form-select-sm" name="day_wise"><option value="1">Day OD (needs proof)</option><option value="0">Period OD request</option></select></div>
-          <div class="col-md-3"><label class="form-label small">Periods (optional)</label><input class="form-control form-control-sm" name="periods_json" placeholder='e.g. 1,2,3'></div>
-          <div class="col-12"><label class="form-label small">Reason *</label><textarea class="form-control form-control-sm" name="reason" rows="2" required></textarea></div>
-          <div class="col-md-8"><label class="form-label small">Proof/Letter (required for Day OD, max 50MB)</label><input class="form-control form-control-sm" type="file" name="proof"></div>
+          <div class="col-md-6"><label class="form-label small">OD Scope *</label>
+            <select class="form-select form-select-sm" name="scope_type" id="scopeType">
+              <option value="full_day">Full Day (all periods 1&ndash;7, same for each approved date)</option>
+              <option value="half_day_1_4">Half Day - Periods 1&ndash;4</option>
+              <option value="half_day_5_7">Half Day - Periods 5&ndash;7</option>
+              <option value="specific">Specific Period(s)</option>
+            </select>
+          </div>
+          <div class="col-12 scope-box" id="specificBox">
+            <label class="form-label small">Select specific periods (applied to each approved date)</label>
+            <div class="d-flex flex-wrap gap-3">
+              {% for p in range(1,8) %}<label class="form-check form-check-inline small"><input class="form-check-input period-cb" type="checkbox" value="{{p}}"> P{{p}}</label>{% endfor %}
+            </div>
+            <input type="hidden" name="periods_json" id="periodsJson">
+          </div>
+          <div class="col-12"><label class="form-label small">Reason *</label><textarea class="form-control form-control-sm" name="reason" rows="2" required placeholder="Event/permission reason"></textarea></div>
+          <div class="col-md-8"><label class="form-label small">Proof/Letter (optional, max 50MB)</label><input class="form-control form-control-sm" type="file" name="proof"></div>
           <div class="col-md-4 d-grid align-items-end"><button class="btn btn-primary btn-sm" type="submit">Submit OD Request</button></div>
         </div>
       </form>
@@ -41,56 +45,125 @@
     </div>
     <div class="card p-3 shadow-sm glass-card">
       <h5>My OD Requests</h5>
-      <div class="table-responsive"><table class="table table-sm"><thead><tr><th>ID</th><th>Dates</th><th>Reason</th><th>Status</th><th>Advisor</th><th>HOD</th><th>Proof</th></tr></thead><tbody id="myOdBody"><tr><td colspan="7" class="small text-muted">Loading...</td></tr></tbody></table></div>
+      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>ID</th><th>Class</th><th>Dates / Scope</th><th>Reason</th><th>Status</th><th>Advisor</th><th>HOD</th><th>Proof</th></tr></thead><tbody id="myOdBody"><tr><td colspan="8" class="small text-muted">Loading...</td></tr></tbody></table></div>
     </div>
     {% else %}
     <div class="card p-3 shadow-sm glass-card">
-      <div class="d-flex justify-content-between align-items-center mb-2"><h5 class="mb-0">OD Requests (Review)</h5><button id="refreshOd" class="btn btn-outline-secondary btn-sm">Refresh</button></div>
-      <p class="small text-muted mb-2">Class advisor sees own class pending requests. HOD/Admin see advisor-approved requests for final approval. Reject at any stage cancels OD.</p>
-      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>ID</th><th>Student</th><th>Class</th><th>Dates</th><th>Reason</th><th>Status</th><th>Proof</th><th>Actions</th></tr></thead><tbody id="odBody"><tr><td colspan="8" class="small text-muted">Loading...</td></tr></tbody></table></div>
+      <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <div><h5 class="mb-0">OD Requests (Review)</h5><div id="viewerNote" class="small text-muted"></div></div>
+        <button id="refreshOd" class="btn btn-outline-secondary btn-sm">Refresh</button>
+      </div>
+      <p class="small text-muted mb-2"><strong>Class Advisor:</strong> approve/reject requests for your own class (pending advisor). <strong>HOD:</strong> approve/reject requests after advisor approval. Rejection cancels OD. You may add an optional message/reason for rejection (shown to student). <strong>Admin is not involved in OD.</strong></p>
+      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>ID</th><th>Student</th><th>Class</th><th>Dates / Scope</th><th>Reason</th><th>Status</th><th>Proof</th><th>Action</th></tr></thead><tbody id="odBody"><tr><td colspan="8" class="small text-muted">Loading...</td></tr></tbody></table></div>
       <div id="odMsg" class="small mt-2"></div>
+    </div>
+
+    <div class="card p-3 shadow-sm glass-card mt-3">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <div><h5 class="mb-0">OD History</h5><div class="small text-muted">HOD/Admin see all; Advisor sees own class; other staff no history access.</div></div>
+        <button id="reloadOdHist" class="btn btn-outline-secondary btn-sm">Refresh</button>
+      </div>
+      <div class="row g-2 mb-2">
+        <div class="col-6 col-md-2"><select id="histClass" class="form-select form-select-sm"><option value="">All classes</option>{% for c in classes %}<option>{{ c }}</option>{% endfor %}</select></div>
+        <div class="col-6 col-md-2"><select id="histStatus" class="form-select form-select-sm"><option value="">All status</option><option value="pending_advisor">Pending Advisor</option><option value="advisor_approved">Awaiting HOD</option><option value="od_approved">Approved</option><option value="cancelled">Cancelled/Rejected</option></select></div>
+        <div class="col-6 col-md-2"><input type="date" id="histFrom" class="form-control form-control-sm" title="From"></div>
+        <div class="col-6 col-md-2"><input type="date" id="histTo" class="form-control form-control-sm" title="To"></div>
+        <div class="col-8 col-md-2"><input id="histQ" class="form-control form-control-sm" placeholder="Name/Reg/ID"></div>
+        <div class="col-4 col-md-2 d-grid"><button id="applyOdHist" class="btn btn-primary btn-sm">Apply</button></div>
+      </div>
+      <div id="odHistCounts" class="small text-muted mb-2"></div>
+      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>ID</th><th>Student</th><th>Class</th><th>Dates / Scope</th><th>Status</th><th>Advisor</th><th>HOD</th><th>Updated</th></tr></thead><tbody id="odHistBody"><tr><td colspan="8" class="small text-muted">Loading...</td></tr></tbody></table></div>
     </div>
     {% endif %}
   </div>
-</div>
+{% endblock %}
+{% block scripts %}
 <script>
 const $=id=>document.getElementById(id);
 function esc(s){return (s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function msg(t,c='text-muted'){const el=$('odMsg'); if(el){el.className='small mt-2 '+c; el.textContent=t;}}
+function badge(st){const m={od_approved:'bg-success',cancelled:'bg-danger',advisor_approved:'bg-info text-dark',pending_advisor:'bg-warning text-dark'}; return `<span class="badge ${m[st]||'bg-secondary'}">${esc(st)}</span>`}
+function scopeText(x){try{const p=JSON.parse(x.periods_json||'[]'); if(x.day_wise) return 'Full day (1?7)'; if(Array.isArray(p)&&p.length) return 'Periods '+p.join(',');}catch(e){} return x.day_wise?'Full day':'Period(s)';}
 {% if session.get('role')=='student' %}
+const scopeType=$('scopeType'), specificBox=$('specificBox');
+scopeType.addEventListener('change',()=>{specificBox.style.display=scopeType.value==='specific'?'block':'none';});
 async function loadMy(){
   const r=await fetch('/api/od/my'); const d=await r.json();
-  const rows=d.requests||[]; $('myOdBody').innerHTML=rows.length?rows.map(x=>`<tr><td>${x.id}</td><td>${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' → '+esc(x.to_date):''} ${x.day_wise?'<span class="badge bg-secondary">Day</span>':''}</td><td class="small">${esc(x.reason)}</td><td><span class="badge ${x.status==='od_approved'?'bg-success':x.status==='cancelled'?'bg-danger':'bg-warning text-dark'}">${esc(x.status)}</span></td><td class="small">${esc(x.advisor_decision||'-')} ${esc(x.advisor_note||'')}</td><td class="small">${esc(x.hod_decision||'-')} ${esc(x.hod_note||'')}</td><td class="small">${esc(x.proof_name||'-')}</td></tr>`).join(''):'<tr><td colspan="7" class="small text-muted">No requests.</td></tr>';
+  const rows=d.requests||[]; $('myOdBody').innerHTML=rows.length?rows.map(x=>{
+    const rej=(x.advisor_decision==='rejected'?x.advisor_note:'')||(x.hod_decision==='rejected'?x.hod_note:'')||(x.hod_decision==='cancelled'?x.hod_note:'')||'';
+    const hodDisp = x.hod_decision_display || ((x.advisor_decision==='rejected')?'NIL':(x.hod_decision||'-'));
+    return `<tr><td>${x.id}</td><td>${esc(x.class_name||'')}</td><td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' â†’ '+esc(x.to_date):''}<div class="text-muted">${esc(scopeText(x))}</div></td><td class="small">${esc(x.reason)}</td><td>${badge(x.status)}<div class="small text-muted">${esc(x.status_label||'')}</div>${rej?`<div class="small text-danger">Message: ${esc(rej)}</div>`:''}</td><td class="small">${esc(x.advisor_decision||'-')}${x.advisor_note?`<div class="text-muted">${esc(x.advisor_note)}</div>`:''}</td><td class="small">${esc(hodDisp)}${x.hod_note?`<div class="text-muted">${esc(x.hod_note)}</div>`:''}</td><td class="small">${esc(x.proof_name||'-')}</td></tr>`;
+  }).join(''):'<tr><td colspan="8" class="small text-muted">No requests.</td></tr>';
 }
 $('odForm').addEventListener('submit', async e=>{
-  e.preventDefault(); msg('Submitting...'); const fd=new FormData(e.target);
-  const r=await fetch('/api/od/request',{method:'POST',body:fd}); const d=await r.json();
-  if(r.ok&&d.ok){msg(d.message||'Submitted','text-success'); e.target.reset(); loadMy();}
-  else msg(d.error||'Failed','text-danger');
+  e.preventDefault(); msg('Submitting OD request...');
+  try{
+    if(scopeType.value==='specific'){
+      const ps=[...document.querySelectorAll('.period-cb:checked')].map(x=>x.value);
+      if(!ps.length){msg('Select at least one period for specific-period OD.','text-danger'); return;}
+      $('periodsJson').value=ps.join(',');
+    } else $('periodsJson').value='';
+    const fd=new FormData(e.target);
+    const r=await fetch('/api/od/request',{method:'POST',body:fd,credentials:'same-origin'});
+    let d={}; try{ d=await r.json(); }catch(_){ d={error:'Server returned non-JSON response (HTTP '+r.status+')'}; }
+    if(r.ok && d.ok){ msg(d.message||'Submitted','text-success'); e.target.reset(); specificBox.style.display='none'; loadMy(); }
+    else { msg((d && d.error) ? d.error : ('Submit failed (HTTP '+r.status+')'), 'text-danger'); console.error('OD submit failed', r.status, d); }
+  }catch(err){ msg('Submit error: '+(err && err.message ? err.message : err), 'text-danger'); console.error(err); }
 });
 loadMy();
 {% else %}
 async function loadPending(){
+  msg('Loading...');
   const r=await fetch('/api/od/pending'); const d=await r.json(); const rows=d.requests||[];
-  $('odBody').innerHTML=rows.length?rows.map(x=>`<tr>
+  $('viewerNote').textContent=d.note ? d.note : (d.viewer_role==='advisor' ? 'Showing your class requests pending advisor approval.' : d.viewer_role==='hod' ? 'Showing requests pending HOD final approval (advisor approved).' : '');
+  $('odBody').innerHTML=rows.length?rows.map(x=>{
+    const acts=(x.allowed_actions||[]); let btns='';
+    if(acts.includes('advisor_approve')) btns+=`<button class="btn btn-success btn-sm" onclick="reviewOd(${x.id},'advisor_approve',false)">Approve</button> `;
+    if(acts.includes('advisor_reject')) btns+=`<button class="btn btn-danger btn-sm" onclick="reviewOd(${x.id},'advisor_reject',true)">Reject</button> `;
+    if(acts.includes('hod_approve')) btns+=`<button class="btn btn-success btn-sm" onclick="reviewOd(${x.id},'hod_approve',false)">Approve (Final)</button> `;
+    if(acts.includes('hod_reject')) btns+=`<button class="btn btn-danger btn-sm" onclick="reviewOd(${x.id},'hod_reject',true)">Reject</button> `;
+    if(acts.includes('hod_cancel')) btns+=`<button class="btn btn-warning btn-sm" onclick="reviewOd(${x.id},'hod_cancel',true)">Cancel OD (HOD)</button> `;
+    if(!btns) btns='<span class="small text-muted">No action</span>';
+    const hodDisp = x.hod_decision_display || ((x.advisor_decision==='rejected')?'NIL':(x.hod_decision||'-'));
+    return `<tr>
     <td>${x.id}</td><td>${esc(x.student_name)}<div class="small text-muted">${esc(x.reg_no||'')}</div></td><td>${esc(x.class_name)}</td>
-    <td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' → '+esc(x.to_date):''}${x.day_wise?' (Day)':''}</td>
-    <td class="small">${esc(x.reason)}</td><td><span class="badge bg-info text-dark">${esc(x.status)}</span></td>
-    <td>${x.proof_name?`<a class="btn btn-outline-secondary btn-sm" href="/api/od/proof/${x.id}">Proof</a>`:'-'}</td>
-    <td><div class="btn-group btn-group-sm flex-wrap">
-      <button class="btn btn-outline-success" onclick="reviewOd(${x.id},'advisor_approve')">Advisor Approve</button>
-      <button class="btn btn-outline-danger" onclick="reviewOd(${x.id},'advisor_reject')">Advisor Reject</button>
-      <button class="btn btn-success" onclick="reviewOd(${x.id},'hod_approve')">HOD Approve</button>
-      <button class="btn btn-danger" onclick="reviewOd(${x.id},'hod_reject')">HOD Reject</button>
-    </div></td></tr>`).join(''):'<tr><td colspan="8" class="small text-muted">No pending requests in your scope.</td></tr>';
+    <td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' â†’ '+esc(x.to_date):''}<div class="text-muted">${esc(scopeText(x))}</div></td>
+    <td class="small">${esc(x.reason)}${(x.advisor_decision||x.hod_decision)?`<div class="text-muted">Adv: ${esc(x.advisor_decision||'-')} | HOD: ${esc(hodDisp)}</div>`:''}</td><td>${badge(x.status)}</td>
+    <td>${x.proof_name?`<a class="btn btn-outline-secondary btn-sm" href="/api/od/proof/${x.id}">Proof</a>`:'<span class="small text-muted">No proof</span>'}</td>
+    <td><div class="d-flex gap-1 flex-wrap">${btns}</div></td></tr>`;
+  }).join(''):'<tr><td colspan="8" class="small text-muted">No requests in your scope.</td></tr>';
+  msg('');
 }
-window.reviewOd=async (request_id,action)=>{
-  const note=prompt('Note (optional):')||''; msg('Updating...');
+window.reviewOd=async (request_id,action,isReject)=>{
+  let note='';
+  if(isReject){ note = prompt('Rejection message/reason (optional, will be shown to student). Leave blank or Cancel to skip message:') ?? ''; if(note===null) note=''; }
+  else { note = prompt('Approval note (optional):') || ''; }
+  msg('Updating...');
   const r=await fetch('/api/od/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id,action,note})});
-  const d=await r.json(); if(r.ok&&d.ok){msg('Updated: '+action,'text-success'); loadPending();} else msg(d.error||'Failed','text-danger');
+  const d=await r.json();
+  if(r.ok&&d.ok){msg((d.message||('Updated: '+action)),'text-success'); loadPending();}
+  else msg(d.error||'Failed','text-danger');
 };
-$('refreshOd').addEventListener('click', loadPending); loadPending();
+async function loadOdHistory(){
+  const p=new URLSearchParams();
+  const cls=$('histClass').value, st=$('histStatus').value, f=$('histFrom').value, t=$('histTo').value, q=$('histQ').value.trim();
+  if(cls) p.set('class',cls); if(st) p.set('status',st); if(f) p.set('from',f); if(t) p.set('to',t); if(q) p.set('q',q);
+  $('odHistBody').innerHTML='<tr><td colspan="8" class="small text-muted">Loading...</td></tr>';
+  try{
+    const r=await fetch('/api/od/history?'+p.toString()); const d=await r.json();
+    if(d.note){ $('odHistCounts').textContent=d.note; $('odHistBody').innerHTML='<tr><td colspan="8" class="small text-muted">No access.</td></tr>'; return; }
+    const c=d.counts||{}; $('odHistCounts').textContent=`Pending Advisor: ${c.pending_advisor||0} | Awaiting HOD: ${c.advisor_approved||0} | Approved: ${c.od_approved||0} | Cancelled: ${c.cancelled||0}`;
+    const rows=d.requests||[];
+    $('odHistBody').innerHTML=rows.length?rows.map(x=>{
+      const hodDisp=x.hod_decision_display||((x.advisor_decision==='rejected')?'NIL':(x.hod_decision||'-'));
+      return `<tr><td>${x.id}</td><td>${esc(x.student_name)}<div class="small text-muted">${esc(x.reg_no||'')}</div></td><td>${esc(x.class_name)}</td><td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' to '+esc(x.to_date):''}<div class="text-muted">${esc(scopeText(x))}</div></td><td>${badge(x.status)}<div class="small text-muted">${esc(x.status_label||'')}</div></td><td class="small">${esc(x.advisor_decision||'-')}</td><td class="small">${esc(hodDisp)}</td><td class="small text-muted">${esc((x.updated_at||'').slice(0,19).replace('T',' '))}</td></tr>`;
+    }).join(''):'<tr><td colspan="8" class="small text-muted">No OD history for these filters.</td></tr>';
+  }catch(e){ $('odHistBody').innerHTML='<tr><td colspan="8" class="small text-danger">Could not load OD history.</td></tr>'; }
+}
+$('refreshOd').addEventListener('click', loadPending);
+$('applyOdHist')?.addEventListener('click', loadOdHistory);
+$('reloadOdHist')?.addEventListener('click', loadOdHistory);
+loadPending(); loadOdHistory();
 {% endif %}
 </script>
-</body>
-</html>
+{% endblock %}

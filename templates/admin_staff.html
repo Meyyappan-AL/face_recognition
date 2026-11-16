@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+{% block title %}Staff Management{% endblock %}
+{% block head %}
+  <style>
+    .staff-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600}
+    .staff-avatar{width:34px;height:34px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#e8eefc;color:#37476A;font-weight:700;font-size:.8rem;flex:0 0 auto}
+    .tt-chip{display:inline-flex;align-items:center;gap:.25rem;border:1px solid #e2e8f0;background:#f8fafc;border-radius:999px;padding:.15rem .5rem;font-size:.72rem;margin:0 .25rem .25rem 0}
+    .table td,.table th{vertical-align:middle}
+  </style>
+{% endblock %}
+{% block content %}
+  <div class="container-fluid px-0">
+    <div class="row g-3 mb-3">
+      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Staff accounts</div><div class="value" id="kTotal">-</div><div class="sub">excluding Admin</div></div></div>
+      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Active</div><div class="value text-success" id="kActive">-</div><div class="sub">can log in</div></div></div>
+      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Advisors</div><div class="value text-primary" id="kAdvisors">-</div><div class="sub">class advisors</div></div></div>
+      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">HOD</div><div class="value text-warning" id="kHod">-</div><div class="sub">override access</div></div></div>
+    </div>
+
+    <div class="card erp-card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+          <h5 class="erp-section-title mb-1">Staff / HOD / Advisor Accounts</h5>
+          <div class="erp-muted">Staff passwords default to the display name in ALL CAPS. Existing passwords are preserved during timetable sync unless you reset them.</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button id="addBtn" class="btn btn-primary btn-sm" type="button">Add Staff</button>
+          <button id="syncBtn" class="btn btn-outline-primary btn-sm" type="button">Sync From Timetable</button>
+          <label class="btn btn-outline-secondary btn-sm mb-0" for="csvFile">Import CSV</label>
+          <input id="csvFile" type="file" accept=".csv,text/csv" class="d-none">
+          <button id="exportBtn" class="btn btn-outline-secondary btn-sm" type="button">Export CSV</button>
+        </div>
+      </div>
+
+      <div id="msg" class="alert alert-light border py-2 small d-none"></div>
+
+      <div class="row g-2 mb-2">
+        <div class="col-md-5"><input id="search" class="form-control form-control-sm" placeholder="Search name, code, class, phone or email"></div>
+        <div class="col-md-3">
+          <select id="filterRole" class="form-select form-select-sm">
+            <option value="">All roles</option>
+            <option value="hod">HOD</option>
+            <option value="advisor">Advisors</option>
+            <option value="staff">Regular staff</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+        <div class="col-md-2"><button id="refreshBtn" class="btn btn-outline-dark btn-sm w-100" type="button">Refresh</button></div>
+      </div>
+
+      <div class="erp-table-wrap">
+        <table class="table table-hover erp-table mb-0">
+          <thead>
+            <tr><th>Staff</th><th>Code</th><th>Role</th><th>Advisor class</th><th>Contact</th><th>Status</th><th class="text-end">Actions</th></tr>
+          </thead>
+          <tbody id="staffBody"><tr><td colspan="7" class="text-center text-muted py-4">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-8">
+        <div class="card erp-card p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+              <h6 class="erp-section-title mb-1">Timetable Staff</h6>
+              <div class="erp-muted">Staff discovered from timetable `staff_directory` entries.</div>
+            </div>
+            <span id="ttCount" class="badge bg-secondary">-</span>
+          </div>
+          <div class="erp-table-wrap">
+            <table class="table table-sm table-hover erp-table mb-0">
+              <thead><tr><th>Code</th><th>Name</th><th>Advisor</th><th>Account</th><th class="text-end">Action</th></tr></thead>
+              <tbody id="ttBody"><tr><td colspan="5" class="text-center text-muted py-3">No timetable staff loaded.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="card erp-card p-3">
+          <h6 class="erp-section-title mb-2">CSV format</h6>
+          <div class="erp-muted mb-2">Header row:</div>
+          <pre class="small bg-light border rounded p-2 mb-2" style="white-space:pre-wrap">staff_code,display_name,phone,email,is_hod,advisor_class,active,password</pre>
+          <ul class="small text-muted mb-0 ps-3">
+            <li><code>staff_code</code> and <code>display_name</code> are required.</li>
+            <li><code>is_hod</code> and <code>active</code> accept 1/0, true/false, yes/no.</li>
+            <li><code>password</code> is optional; blank keeps/defaults the name rule.</li>
+            <li>Rows with a student login code are rejected.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="staffModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="staffModalTitle">Add Staff</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="staffForm">
+        <div class="modal-body">
+          <input type="hidden" id="editId">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label small">Staff code *</label>
+              <input id="staffCode" class="form-control form-control-sm text-uppercase" maxlength="20" required>
+              <div class="form-text">1-20 letters/digits/._-</div>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label small">Display name *</label>
+              <input id="displayName" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Phone</label>
+              <input id="phone" class="form-control form-control-sm" inputmode="tel">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Email</label>
+              <input id="email" type="email" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Advisor class</label>
+              <select id="advisorClass" class="form-select form-select-sm">
+                <option value="">Not a class advisor</option>
+                {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Password</label>
+              <input id="password" class="form-control form-control-sm" autocomplete="new-password">
+              <div class="form-text">Leave blank to use display name in ALL CAPS.</div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-check form-switch mt-4">
+                <input id="isHod" class="form-check-input" type="checkbox">
+                <label class="form-check-label small" for="isHod">HOD override access</label>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-check form-switch mt-4">
+                <input id="active" class="form-check-input" type="checkbox" checked>
+                <label class="form-check-label small" for="active">Active account</label>
+              </div>
+            </div>
+          </div>
+          <div id="formMsg" class="alert alert-danger py-2 small mt-3 mb-0 d-none"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button id="saveBtn" type="submit" class="btn btn-primary btn-sm">Save Staff</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="resetModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Password Reset</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <p class="small mb-2" id="resetWho"></p>
+        <div class="input-group input-group-sm">
+          <span class="input-group-text">New password</span>
+          <input id="resetPassword" class="form-control" readonly>
+        </div>
+        <div class="form-text">Share this with the staff member. They can change it from Profile.</div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Done</button></div>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  let staff=[], ttStaff={}, advisors={}, editingId=null;
+  const modalEl=$('staffModal');
+  const modal=()=>window.bootstrap?new bootstrap.Modal(modalEl):null;
+  const resetModal=()=>window.bootstrap?new bootstrap.Modal($('resetModal')):null;
+
+  function msg(t,type='info'){
+    const e=$('msg'); if(!t){ e.classList.add('d-none'); return; }
+    e.className='alert alert-'+(type==='danger'?'danger':type==='success'?'success':type==='warning'?'warning':'light border')+' py-2 small';
+    e.innerHTML=t;
+  }
+  function formMsg(t){ const e=$('formMsg'); if(!t){ e.classList.add('d-none'); e.textContent=''; return; } e.classList.remove('d-none'); e.textContent=t; }
+
+  function initials(name){
+    const parts=(name||'').trim().split(/\s+/).filter(Boolean);
+    return ((parts[0]||'?')[0]+(parts.length>1?(parts[parts.length-1][0]||''):'')).toUpperCase();
+  }
+  function roleBadges(s){
+    let out=[];
+    if(Number(s.is_hod)) out.push('<span class="badge bg-warning text-dark">HOD</span>');
+    if(Number(s.is_advisor)) out.push('<span class="badge bg-primary">Advisor</span>');
+    if(!out.length) out.push('<span class="badge bg-secondary">Staff</span>');
+    return out.join(' ');
+  }
+
+  function renderKpis(){
+    $('kTotal').textContent=staff.length;
+    $('kActive').textContent=staff.filter(s=>Number(s.active)).length;
+    $('kAdvisors').textContent=staff.filter(s=>Number(s.is_advisor)).length;
+    $('kHod').textContent=staff.filter(s=>Number(s.is_hod)).length;
+  }
+
+  function renderTable(){
+    const q=($('search').value||'').trim().toLowerCase();
+    const f=$('filterRole').value;
+    let rows=staff.filter(s=>{
+      const hay=[s.display_name,s.username,s.staff_code,s.advisor_class,s.phone,s.email].join(' ').toLowerCase();
+      if(q && !hay.includes(q)) return false;
+      if(f==='hod' && !Number(s.is_hod)) return false;
+      if(f==='advisor' && !Number(s.is_advisor)) return false;
+      if(f==='staff' && (Number(s.is_hod)||Number(s.is_advisor))) return false;
+      if(f==='inactive' && Number(s.active)) return false;
+      return true;
+    });
+    if(!rows.length){ $('staffBody').innerHTML='<tr><td colspan="7" class="text-center text-muted py-4">No staff match this view.</td></tr>'; return; }
+    $('staffBody').innerHTML=rows.map(s=>`
+      <tr>
+        <td><div class="d-flex align-items-center gap-2"><span class="staff-avatar">${esc(initials(s.display_name))}</span><div><div class="fw-semibold">${esc(s.display_name||'-')}</div><div class="small text-muted">${esc(s.username||'')}</div></div></div></td>
+        <td><span class="staff-code">${esc(s.staff_code||s.username||'')}</span></td>
+        <td>${roleBadges(s)}</td>
+        <td>${s.advisor_class?`<span class="badge bg-light text-dark border">${esc(s.advisor_class)}</span>`:'<span class="text-muted small">-</span>'}</td>
+        <td class="small">${s.phone?`<div>${esc(s.phone)}</div>`:''}${s.email?`<div class="text-muted">${esc(s.email)}</div>`:''}${!s.phone&&!s.email?'<span class="text-muted">-</span>':''}</td>
+        <td>${Number(s.active)?'<span class="badge bg-success">Active</span>':'<span class="badge bg-secondary">Inactive</span>'}</td>
+        <td class="text-end text-nowrap">
+          <button class="btn btn-outline-primary btn-sm" data-edit="${Number(s.id)}">Edit</button>
+          <button class="btn btn-outline-warning btn-sm" data-reset="${Number(s.id)}" data-name="${esc(s.display_name||s.username||'')}">Reset</button>
+          <button class="btn btn-outline-${Number(s.active)?'danger':'success'} btn-sm" data-toggle="${Number(s.id)}">${Number(s.active)?'Disable':'Enable'}</button>
+        </td>
+      </tr>`).join('');
+  }
+
+  function renderTimetableStaff(){
+    const codes=Object.keys(ttStaff||{}).sort();
+    $('ttCount').textContent=codes.length;
+    if(!codes.length){ $('ttBody').innerHTML='<tr><td colspan="5" class="text-center text-muted py-3">No timetable staff found.</td></tr>'; return; }
+    const accountByCode={}; staff.forEach(s=>{ accountByCode[(s.staff_code||s.username||'').toUpperCase()]=s; });
+    $('ttBody').innerHTML=codes.map(code=>{
+      const info=ttStaff[code]||{}; const name=info.name||code; const adv=(advisors[code]||{}).class||'';
+      const acct=accountByCode[code.toUpperCase()];
+      const status=acct?`<span class="badge bg-success">Linked #${acct.id}</span>`:'<span class="badge bg-warning text-dark">No account</span>';
+      return `<tr>
+        <td><span class="staff-code">${esc(code)}</span></td>
+        <td>${esc(name)}</td>
+        <td>${adv?`<span class="badge bg-light text-dark border">${esc(adv)}</span>`:'<span class="text-muted small">-</span>'}</td>
+        <td>${status}</td>
+        <td class="text-end">${acct?`<button class="btn btn-outline-primary btn-sm" data-edit="${Number(acct.id)}">Edit</button>`:`<button class="btn btn-outline-success btn-sm" data-prefill="${esc(code)}">Add</button>`}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function load(){
+    try{
+      const d=await erp.fetchJSON('/api/admin/staff');
+      staff=d.staff||[]; ttStaff=d.timetable_staff||{}; advisors=d.advisors||{};
+      renderKpis(); renderTable(); renderTimetableStaff();
+    }catch(e){ msg('Could not load staff: '+esc(e.message||e),'danger'); }
+  }
+
+  function openForm(s){
+    editingId=s?Number(s.id):null;
+    $('staffModalTitle').textContent=s?'Edit Staff':'Add Staff';
+    $('staffCode').value=s?(s.staff_code||s.username||''):'';
+    $('staffCode').readOnly=!!s;
+    $('displayName').value=s?(s.display_name||''):'';
+    $('phone').value=s?(s.phone||''):'';
+    $('email').value=s?(s.email||''):'';
+    $('advisorClass').value=s?(s.advisor_class||''):'';
+    $('isHod').checked=s?!!Number(s.is_hod):false;
+    $('active').checked=s?!!Number(s.active):true;
+    $('password').value='';
+    formMsg('');
+    modal()?.show();
+  }
+
+  function openPrefill(code){
+    const info=ttStaff[code]||{}; const adv=(advisors[code]||{}).class||'';
+    openForm({staff_code:code,display_name:info.name||code,advisor_class:adv,is_hod:0,active:1,phone:'',email:''});
+    $('staffCode').readOnly=true;
+  }
+
+  async function saveForm(e){
+    e.preventDefault(); formMsg('');
+    const payload={
+      staff_code:$('staffCode').value.trim().toUpperCase(),
+      display_name:$('displayName').value.trim(),
+      phone:$('phone').value.trim(),
+      email:$('email').value.trim(),
+      advisor_class:$('advisorClass').value,
+      is_hod:$('isHod').checked?1:0,
+      active:$('active').checked?1:0,
+      password:$('password').value
+    };
+    if(!payload.staff_code||!payload.display_name){ formMsg('Staff code and display name are required.'); return; }
+    $('saveBtn').disabled=true;
+    try{
+      const d=await erp.fetchJSON('/api/admin/staff',{method:'POST',body:payload});
+      bootstrap.Modal.getInstance(modalEl)?.hide();
+      msg('Saved staff <strong>'+esc(payload.display_name)+'</strong>.','success');
+      erp.toast('Staff saved','success');
+      await load();
+      const s=staff.find(x=>Number(x.id)===Number(d.id)); if(s&&!s.active) msg('Saved, but this account is inactive.','warning');
+    }catch(err){ formMsg(err.message||'Save failed.'); }
+    finally{ $('saveBtn').disabled=false; }
+  }
+
+  async function resetPassword(id,name){
+    if(!confirm('Reset password for '+name+'? This immediately replaces the current password.')) return;
+    try{
+      const d=await erp.fetchJSON('/api/admin/staff/'+id+'/reset_password',{method:'POST',body:{}});
+      $('resetWho').textContent='New password for '+name+':';
+      $('resetPassword').value=d.password||'';
+      resetModal()?.show();
+      await load();
+    }catch(e){ msg('Reset failed: '+esc(e.message||e),'danger'); }
+  }
+
+  async function toggle(id){
+    try{
+      const d=await erp.fetchJSON('/api/admin/staff/'+id+'/toggle',{method:'POST',body:{}});
+      msg(d.active?'Account enabled.':'Account disabled.','success');
+      await load();
+    }catch(e){ msg('Could not change account status: '+esc(e.message||e),'danger'); }
+  }
+
+  async function sync(){
+    if(!confirm('Sync staff accounts from timetable files? Existing passwords will be preserved.')) return;
+    $('syncBtn').disabled=true; msg('Syncing from timetables...');
+    try{
+      const d=await erp.fetchJSON('/api/admin/staff/sync',{method:'POST',body:{}});
+      msg(`Sync complete: ${d.added||0} added, ${d.updated||0} updated, ${d.staff||0} timetable staff, ${d.advisors||0} advisors.`,'success');
+      await load();
+    }catch(e){ msg('Sync failed: '+esc(e.message||e),'danger'); }
+    finally{ $('syncBtn').disabled=false; }
+  }
+
+  async function importCsv(file){
+    if(!file) return;
+    const fd=new FormData(); fd.append('file',file);
+    msg('Importing '+esc(file.name)+'...');
+    try{
+      const d=await erp.fetchJSON('/api/admin/staff/import',{method:'POST',body:fd});
+      const errs=(d.errors||[]);
+      msg(`Imported ${esc(file.name)}: ${d.added||0} added, ${d.updated||0} updated${errs.length?', '+errs.length+' row errors':''}.`,errs.length?'warning':'success');
+      if(errs.length){
+        const box=document.getElementById('msg');
+        box.innerHTML+='<div class="mt-2"><strong>Errors</strong><ul class="mb-0 ps-3">'+errs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>';
+      }
+      await load();
+    }catch(e){ msg('Import failed: '+esc(e.message||e),'danger'); }
+    finally{ $('csvFile').value=''; }
+  }
+
+  function exportCsv(){
+    const rows=[['staff_code','display_name','phone','email','is_hod','advisor_class','active']];
+    staff.forEach(s=>rows.push([s.staff_code||s.username||'',s.display_name||'',s.phone||'',s.email||'',Number(s.is_hod)||0,s.advisor_class||'',Number(s.active)||0]));
+    const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+    const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='staff.csv'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }
+
+  $('staffBody').addEventListener('click',e=>{
+    const ed=e.target.closest('[data-edit]'); if(ed){ openForm(staff.find(s=>Number(s.id)===Number(ed.dataset.edit))); return; }
+    const rs=e.target.closest('[data-reset]'); if(rs){ resetPassword(Number(rs.dataset.reset),rs.dataset.name||'this staff member'); return; }
+    const tg=e.target.closest('[data-toggle]'); if(tg){ toggle(Number(tg.dataset.toggle)); }
+  });
+  $('ttBody').addEventListener('click',e=>{
+    const ed=e.target.closest('[data-edit]'); if(ed){ openForm(staff.find(s=>Number(s.id)===Number(ed.dataset.edit))); return; }
+    const pf=e.target.closest('[data-prefill]'); if(pf) openPrefill(pf.dataset.prefill);
+  });
+  $('addBtn').addEventListener('click',()=>openForm(null));
+  $('syncBtn').addEventListener('click',sync);
+  $('refreshBtn').addEventListener('click',load);
+  $('exportBtn').addEventListener('click',exportCsv);
+  $('csvFile').addEventListener('change',e=>importCsv(e.target.files[0]));
+  $('search').addEventListener('input',renderTable);
+  $('filterRole').addEventListener('change',renderTable);
+  $('staffForm').addEventListener('submit',saveForm);
+  modalEl.addEventListener('show.bs.modal',()=>$('staffCode').classList.toggle('text-uppercase',!$('staffCode').readOnly));
+
+  load();
+})();
+</script>
+{% endblock %}

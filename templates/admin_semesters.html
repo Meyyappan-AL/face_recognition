@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Semesters{% endblock %}
+{% block content %}
+  <div class="container" style="max-width:1100px">
+    <div class="row g-3">
+      <div class="col-lg-5">
+        <div class="card erp-card p-3">
+          <h5 class="erp-section-title mb-1" id="formTitle">Add Semester</h5>
+          <div class="erp-muted mb-3">One semester is marked current. Current semester runs from start date to today; completed semesters run to the last scheduled working day. Students and staff can pick any semester from their dropdowns.</div>
+          <form id="semForm">
+            <input type="hidden" name="id" id="semId">
+            <div class="mb-2"><label class="form-label small">Label *</label><input class="form-control form-control-sm" name="label" id="semLabel" placeholder="e.g. Semester 5 (2026-27)" required></div>
+            <div class="row g-2">
+              <div class="col-6"><label class="form-label small">Start date</label><input class="form-control form-control-sm" type="date" name="start_date" id="semStart"></div>
+              <div class="col-6"><label class="form-label small">End date</label><input class="form-control form-control-sm" type="date" name="end_date" id="semEnd"></div>
+            </div>
+            <div class="form-check my-2"><input class="form-check-input" type="checkbox" name="is_current" id="semCurrent"><label class="form-check-label small" for="semCurrent">Mark as current semester</label></div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-primary btn-sm" type="submit">Save Semester</button>
+              <button class="btn btn-outline-secondary btn-sm" type="button" id="resetBtn">New</button>
+            </div>
+            <div id="semMsg" class="small mt-2"></div>
+          </form>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        <div class="card erp-card p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="erp-section-title mb-0">Semester list</h5>
+            <button class="btn btn-outline-secondary btn-sm" id="reloadBtn">Refresh</button>
+          </div>
+          <div class="erp-table-wrap">
+            <table class="table table-sm erp-table align-middle mb-0">
+              <thead><tr><th>Label</th><th>Start</th><th>End</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="semBody"><tr><td colspan="5" class="erp-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+          <div class="erp-muted mt-2">Deleting the current semester promotes the most recent remaining semester. Date changes also update the legacy ERP settings for compatibility.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+function msg(t,c='text-muted'){const e=$('semMsg'); e.className='small mt-2 '+c; e.textContent=t||'';}
+let rows=[];
+function resetForm(){ $('semId').value=''; $('semLabel').value=''; $('semStart').value=''; $('semEnd').value=''; $('semCurrent').checked=false; $('formTitle').textContent='Add Semester'; msg(''); }
+function fillForm(id){ const s=rows.find(x=>String(x.id)===String(id)); if(!s) return; $('semId').value=s.id; $('semLabel').value=s.label||''; $('semStart').value=s.start_date||''; $('semEnd').value=s.end_date||''; $('semCurrent').checked=!!s.is_current; $('formTitle').textContent='Edit Semester #'+s.id; window.scrollTo({top:0,behavior:'smooth'}); }
+function render(){
+  $('semBody').innerHTML = rows.length ? rows.map(s=>`<tr>
+    <td class="fw-semibold">${esc(s.label)}</td>
+    <td>${esc(s.start_date||'-')}</td>
+    <td>${esc(s.end_date||'-')}</td>
+    <td>${s.is_current?'<span class="badge bg-success">Current</span>':'<span class="badge bg-secondary">Completed / other</span>'}</td>
+    <td><div class="d-flex gap-1 flex-wrap">
+      <button class="btn btn-outline-primary btn-sm" data-edit="${s.id}">Edit</button>
+      ${s.is_current?'':'<button class="btn btn-outline-success btn-sm" data-current="'+s.id+'">Set current</button>'}
+      <button class="btn btn-outline-danger btn-sm" data-del="${s.id}">Delete</button>
+    </div></td></tr>`).join('') : '<tr><td colspan="5" class="erp-empty">No semesters. Add one to get started.</td></tr>';
+  $('semBody').querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>fillForm(b.getAttribute('data-edit'))));
+  $('semBody').querySelectorAll('[data-current]').forEach(b=>b.addEventListener('click',()=>{ fillForm(b.getAttribute('data-current')); $('semCurrent').checked=true; $('semForm').requestSubmit(); }));
+  $('semBody').querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>delSem(b.getAttribute('data-del'))));
+}
+async function load(){
+  try{
+    const d=await erp.fetchJSON('/api/admin/semesters'); rows=d.semesters||[]; render();
+  }catch(e){ $('semBody').innerHTML='<tr><td colspan="5" class="text-danger small">'+esc(e.message||'Could not load semesters')+'</td></tr>'; }
+}
+async function delSem(id){
+  const s=rows.find(x=>String(x.id)===String(id)); if(!s) return;
+  if(!confirm('Delete semester "'+(s.label||'')+'"? Attendance records are kept.')) return;
+  try{ const d=await erp.fetchJSON('/api/admin/semesters/'+id,{method:'DELETE'}); rows=d.semesters||[]; render(); resetForm(); erp.toast('Semester deleted','success'); }
+  catch(e){ msg(e.message||'Delete failed','text-danger'); }
+}
+$('semForm').addEventListener('submit', async e=>{
+  e.preventDefault(); msg('Saving...');
+  const payload=Object.fromEntries(new FormData(e.target).entries());
+  payload.is_current=$('semCurrent').checked?1:0;
+  try{
+    const d=await erp.fetchJSON('/api/admin/semesters',{method:'POST',body:payload});
+    rows=d.semesters||[]; render(); resetForm(); erp.toast('Semester saved','success');
+  }catch(err){ msg(err.message||'Save failed','text-danger'); }
+});
+$('resetBtn').addEventListener('click',resetForm);
+$('reloadBtn').addEventListener('click',load);
+load();
+</script>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Academic Calendar{% endblock %}
+{% block content %}
+  <div class="container" style="max-width:1100px">
+    <div class="row g-3">
+      <div class="col-lg-4">
+        <div class="card p-3 shadow-sm glass-card">
+          <h5>Add Entry</h5>
+          <p class="small text-muted mb-2">Admin sets college calendar items (holidays, events, exams, working-day overrides). Student dashboard uses these for working-day/semester context.</p>
+          <form id="calForm">
+            <div class="mb-2"><label class="form-label small">Title *</label><input class="form-control form-control-sm" name="title" required></div>
+            <div class="row g-2 mb-2">
+              <div class="col-6"><label class="form-label small">Date *</label><input class="form-control form-control-sm" type="date" name="date" required></div>
+              <div class="col-6"><label class="form-label small">End date</label><input class="form-control form-control-sm" type="date" name="end_date"></div>
+            </div>
+            <div class="mb-2"><label class="form-label small">Type *</label>
+              <select class="form-select form-select-sm" name="type" id="calType">
+                <option value="holiday">Holiday (non-working)</option>
+                <option value="event">Event</option>
+                <option value="exam">Exam / Academic</option>
+                <option value="working_day_override">Working day override</option>
+                <option value="note">Note</option>
+              </select>
+            </div>
+            <div class="mb-2"><label class="form-label small">Applies to</label>
+              <select class="form-select form-select-sm" name="class_name">
+                <option value="">All classes</option>
+                {% for c in erp_classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="form-check mb-2 small"><input class="form-check-input" type="checkbox" name="affects_attendance" id="affects" checked><label class="form-check-label" for="affects">Affects attendance/working-day context</label></div>
+            <div class="mb-2"><label class="form-label small">Notes</label><textarea class="form-control form-control-sm" name="notes" rows="2"></textarea></div>
+            <button class="btn btn-primary btn-sm w-100" type="submit">Save Entry</button>
+          </form>
+          <div id="calMsg" class="small mt-2"></div>
+        </div>
+      </div>
+      <div class="col-lg-8">
+        <div class="card p-3 shadow-sm glass-card">
+          <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2"><h5 class="mb-0">Calendar Entries</h5><button id="reloadCal" class="btn btn-outline-secondary btn-sm">Refresh</button></div>
+          <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Date(s)</th><th>Type</th><th>Title</th><th>Class</th><th>Notes</th><th></th></tr></thead><tbody id="calBody"><tr><td colspan="6" class="small text-muted">Loading...</td></tr></tbody></table></div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+function msg(t,c='text-muted'){const e=$('calMsg'); if(e){e.className='small mt-2 '+c; e.textContent=t;}}
+async function loadCal(){
+  const r=await fetch('/api/admin/calendar'); const d=await r.json(); const rows=d.items||[];
+  $('calBody').innerHTML=rows.length?rows.map(x=>`<tr><td class="small">${esc(x.date)}${x.end_date&&x.end_date!==x.date?' ? '+esc(x.end_date):''}</td><td><span class="badge ${x.type==='holiday'?'bg-danger':x.type==='event'?'bg-info text-dark':x.type==='exam'?'bg-warning text-dark':'bg-secondary'}">${esc(x.type)}</span></td><td>${esc(x.title)}</td><td class="small">${esc(x.class_name||'All')}</td><td class="small text-muted">${esc(x.notes||'')}</td><td><button class="btn btn-outline-danger btn-sm" onclick="delCal(${x.id})">Delete</button></td></tr>`).join(''):'<tr><td colspan="6" class="small text-muted">No entries. Add holidays/events to inform student dashboards.</td></tr>';
+}
+$('calForm').addEventListener('submit', async e=>{
+  e.preventDefault(); msg('Saving...');
+  const fd=new FormData(e.target); fd.set('affects_attendance', $('affects').checked?'1':'0');
+  const r=await fetch('/api/admin/calendar',{method:'POST',body:fd,credentials:'same-origin'});
+  const d=await r.json().catch(()=>({}));
+  if(r.ok&&d.ok){msg('Saved','text-success'); e.target.reset(); $('affects').checked=true; loadCal();} else msg(d.error||'Failed','text-danger');
+});
+window.delCal=async id=>{ if(!confirm('Delete this calendar entry?')) return; const r=await fetch('/api/admin/calendar/'+id,{method:'DELETE'}); const d=await r.json().catch(()=>({})); if(r.ok&&d.ok) loadCal(); else msg(d.error||'Delete failed','text-danger'); };
+$('reloadCal').addEventListener('click', loadCal); loadCal();
+</script>
+{% endblock %}

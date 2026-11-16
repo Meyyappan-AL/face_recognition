@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block title %}Elective Mapping{% endblock %}
+{% block head %}
+  <style>
+    .elective-table th,.elective-table td{font-size:.78rem;vertical-align:middle}
+    .elective-table thead th{background:#f8fafc;white-space:nowrap}
+    .elective-table .student-col{position:sticky;left:0;background:#fff;z-index:1;min-width:190px;box-shadow:1px 0 0 #e2e8f0}
+    .elective-table thead .student-col{background:#f8fafc;z-index:2}
+    .elective-table select{min-width:170px;font-size:.76rem}
+    .slot-card{border:1px solid #e2e8f0;border-radius:.65rem;padding:.65rem .75rem;background:#fff}
+    .slot-card .slot-key{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700;color:#37476A}
+    .slot-card .option{font-size:.76rem;color:#475569}
+    .legacy-tag{font-size:.65rem;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:999px;padding:0 .35rem}
+    .version-tag{font-size:.65rem;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:999px;padding:0 .35rem}
+    .audit-row{font-size:.76rem;border-bottom:1px solid #f1f5f9;padding:.35rem 0}
+  </style>
+{% endblock %}
+{% block content %}
+  <div class="container-fluid px-0">
+    <div class="card erp-card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <h5 class="erp-section-title mb-1">Student Elective Options</h5>
+          <div class="erp-muted">Map each student to one option per elective timetable slot for the selected timetable version. Both elective staff can mark the full shared roster; historical labels are stored on attendance entries.</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+          <select id="cls" class="form-select form-select-sm" style="min-width:140px" aria-label="Class">
+            {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          </select>
+          <select id="sem" class="form-select form-select-sm" style="min-width:150px" aria-label="Semester"></select>
+          <select id="version" class="form-select form-select-sm" style="min-width:210px" aria-label="Timetable version"></select>
+          <button id="loadBtn" class="btn btn-primary btn-sm" type="button">Load</button>
+          <button id="saveBtn" class="btn btn-success btn-sm" type="button" disabled>Save Mappings</button>
+          <button id="carryBtn" class="btn btn-outline-primary btn-sm" type="button" disabled>Carry Forward</button>
+        </div>
+      </div>
+      <div id="msg" class="alert alert-light border py-2 small mt-3 mb-0 d-none"></div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-6 col-md-2"><div class="card erp-card p-3 erp-kpi"><div class="label">Students</div><div class="value" id="kStudents">-</div><div class="sub">in selected class</div></div></div>
+      <div class="col-6 col-md-2"><div class="card erp-card p-3 erp-kpi"><div class="label">Elective slots</div><div class="value" id="kSlots">-</div><div class="sub">in version</div></div></div>
+      <div class="col-6 col-md-2"><div class="card erp-card p-3 erp-kpi"><div class="label">Mapped</div><div class="value text-success" id="kMapped">-</div><div class="sub">student-slot choices</div></div></div>
+      <div class="col-6 col-md-2"><div class="card erp-card p-3 erp-kpi"><div class="label">Incomplete</div><div class="value text-warning" id="kMissing">-</div><div class="sub">missing choices</div></div></div>
+      <div class="col-6 col-md-2"><div class="card erp-card p-3 erp-kpi"><div class="label">Unassigned</div><div class="value text-danger" id="kUnassigned">-</div><div class="sub">no elective mapped</div></div></div>
+      <div class="col-6 col-md-2"><div class="card erp-card p-3 erp-kpi"><div class="label">Conflicts</div><div class="value text-danger" id="kConflicts">-</div><div class="sub">option not offered</div></div></div>
+    </div>
+
+    <div class="card erp-card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <div>
+          <h6 class="erp-section-title mb-1">Mapping Matrix <span id="versionBadge" class="badge bg-light text-dark border ms-1">No version</span></h6>
+          <div class="erp-muted">Blank cells clear that mapping for this version only when saved. Legacy mappings are used as fallback until saved.</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <input id="search" class="form-control form-control-sm" placeholder="Search student / reg no" style="max-width:230px">
+          <select id="filterMapped" class="form-select form-select-sm" style="max-width:170px">
+            <option value="">All students</option>
+            <option value="missing">Incomplete only</option>
+            <option value="complete">Complete only</option>
+            <option value="unassigned">Unassigned only</option>
+          </select>
+          <a id="exportLink" class="btn btn-outline-secondary btn-sm disabled" href="#">Export CSV</a>
+          <label class="btn btn-outline-secondary btn-sm mb-0" for="importFile">Import CSV</label>
+          <input id="importFile" type="file" accept=".csv,text/csv" class="d-none">
+        </div>
+      </div>
+      <div id="dirty" class="small text-muted mb-2">Load a class to begin.</div>
+      <div class="erp-table-wrap">
+        <table class="table table-bordered table-hover elective-table mb-0" id="matrixTable">
+          <thead><tr><th class="student-col">Student</th></tr></thead>
+          <tbody id="matrixBody"><tr><td class="text-center text-muted py-4">Loading...</td></tr></tbody>
+        </table>
+      </div>
+      <div id="emptySlots" class="alert alert-warning py-2 small mt-2 mb-0 d-none">This timetable version has no elective options. Add <code>options</code> to timetable cells first.</div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-8">
+        <div class="card erp-card p-3 h-100">
+          <h6 class="erp-section-title mb-2">Elective slots</h6>
+          <div id="slotCards" class="row g-2"><div class="col-12 text-muted small">Load a class.</div></div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="card erp-card p-3 h-100">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="erp-section-title mb-0">Recent mapping audit</h6>
+            <a class="small" href="/admin/audit?entity=electives">Open audit</a>
+          </div>
+          <div id="auditList" class="text-muted small">Load a class to see recent elective changes.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const INIT_SEMS={{ semesters|tojson }};
+  let slots=[], students=[], dirty=false, currentClass='', currentVersion=null, versions=[], stats={};
+
+  function msg(t,type='info'){
+    const e=$('msg'); if(!t){ e.classList.add('d-none'); e.innerHTML=''; return; }
+    e.className='alert alert-'+(type==='danger'?'danger':type==='success'?'success':type==='warning'?'warning':'light border')+' py-2 small mt-3 mb-0';
+    e.innerHTML=t;
+  }
+  function setDirty(v){ dirty=v; $('dirty').innerHTML=v?'<span class="badge bg-warning text-dark">Unsaved changes</span>':'<span class="badge bg-success">Loaded</span> '+esc(currentClass)+' '+esc(currentVersion?('v'+currentVersion.version_no):'legacy'); $('saveBtn').disabled=!students.length||!currentVersion; $('carryBtn').disabled=!currentVersion; if(v) $('saveBtn').disabled=!currentVersion; }
+  function key(s){ return s.slot_key; }
+  function studentLabel(s){ return `${s.name||'-'}${s.reg_no?' · '+s.reg_no:''}`; }
+  function currentSem(){ return $('sem').value?Number($('sem').value):null; }
+
+  function fillSemesters(){
+    const cur=(INIT_SEMS.find(s=>Number(s.is_current)===1)||INIT_SEMS[0]||{});
+    $('sem').innerHTML=INIT_SEMS.map(s=>`<option value="${Number(s.id)}" ${Number(s.id)===Number(cur.id)?'selected':''}>${esc(s.label||('Semester '+s.id))}</option>`).join('')||'<option value="">All semesters</option>';
+  }
+
+  function fillVersions(){
+    const sel=$('version'); const curId=currentVersion?Number(currentVersion.id):Number(sel.value||0);
+    sel.innerHTML=(versions.length?'':'<option value="">No timetable version</option>')+versions.map(v=>
+      `<option value="${Number(v.id)}" ${Number(v.id)===curId?'selected':''}>v${Number(v.version_no)} · ${esc(v.effective_from||'')} → ${esc(v.effective_to||'open')} · ${esc(v.status||'')}</option>`
+    ).join('');
+    if(currentVersion) sel.value=String(currentVersion.id);
+    $('versionBadge').textContent=currentVersion?`v${currentVersion.version_no} · ${currentVersion.effective_from||''} → ${currentVersion.effective_to||'open'}`:'No version';
+    $('versionBadge').className='badge ms-1 '+(currentVersion?'bg-success-subtle text-success border border-success-subtle':'bg-light text-dark border');
+  }
+
+  function renderStats(d){
+    stats=d&&d.stats?d.stats:{};
+    $('kStudents').textContent=stats.students??students.length;
+    $('kSlots').textContent=stats.slots??slots.length;
+    $('kMapped').textContent=stats.mapped??'-';
+    $('kMissing').textContent=stats.missing??'-';
+    $('kUnassigned').textContent=stats.unassigned_students??'-';
+    $('kConflicts').textContent=stats.conflicts??'-';
+  }
+
+  function localStats(){
+    let mapped=0, missing=0, unassigned=0, conflicts=0;
+    const opt={}; slots.forEach(s=>opt[key(s)]=new Set(s.options||[]));
+    students.forEach(s=>{
+      const m=s.electives||{}; let filled=0;
+      slots.forEach(sl=>{ const v=m[key(sl)]; if(v){ filled++; if(!opt[key(sl)].has(v)) conflicts++; } });
+      mapped+=filled; missing+=Math.max(0,slots.length-filled); if(slots.length&&!filled) unassigned++;
+    });
+    renderStats({stats:{students:students.length,slots:slots.length,mapped,missing,unassigned_students:unassigned,conflicts}});
+  }
+
+  function visibleStudents(){
+    const q=($('search').value||'').trim().toLowerCase();
+    const f=$('filterMapped').value;
+    return students.filter(s=>{
+      const hay=[s.name,s.reg_no,s.roll,s.class].join(' ').toLowerCase();
+      if(q && !hay.includes(q)) return false;
+      const m=s.electives||{};
+      const filled=slots.filter(x=>m[key(x)]).length;
+      if(f==='missing' && filled>=slots.length) return false;
+      if(f==='complete' && filled<slots.length) return false;
+      if(f==='unassigned' && !(slots.length && filled===0)) return false;
+      return true;
+    });
+  }
+
+  function renderMatrix(){
+    const head=$('matrixTable').querySelector('thead tr');
+    head.innerHTML='<th class="student-col">Student</th>'+slots.map(s=>`<th title="${esc(s.display)}">${esc(s.slot_key)}<div class="small text-muted fw-normal">${esc(s.subject)}</div></th>`).join('');
+    const rows=visibleStudents();
+    if(!students.length){ $('matrixBody').innerHTML='<tr><td colspan="'+(slots.length+1)+'" class="text-center text-muted py-4">No students in this class.</td></tr>'; return; }
+    if(!rows.length){ $('matrixBody').innerHTML='<tr><td colspan="'+(slots.length+1)+'" class="text-center text-muted py-4">No students match this filter.</td></tr>'; return; }
+    $('matrixBody').innerHTML=rows.map(s=>{
+      const m=s.electives||{}, src=s.electives_source||{};
+      const cells=slots.map(sl=>{
+        const val=m[key(sl)]||'';
+        const opts=['<option value="">- none -</option>'].concat((sl.options||[]).map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o)}</option>`));
+        const tag=val?(src[key(sl)]==='legacy'?'<div class="mt-1"><span class="legacy-tag">legacy fallback</span></div>':'<div class="mt-1"><span class="version-tag">version</span></div>'):'';
+        return `<td><select class="form-select form-select-sm elective-select" data-sid="${Number(s.id)}" data-slot="${esc(key(sl))}">${opts.join('')}</select>${tag}</td>`;
+      }).join('');
+      return `<tr><td class="student-col"><div class="fw-semibold">${esc(s.name||'-')}</div><div class="small text-muted">${esc(s.reg_no||'')}${s.roll?' · Roll '+esc(s.roll):''}</div></td>${cells}</tr>`;
+    }).join('');
+    localStats();
+  }
+
+  function renderSlots(){
+    if(!slots.length){ $('emptySlots').classList.remove('d-none'); $('slotCards').innerHTML='<div class="col-12 text-muted small">No elective slots.</div>'; return; }
+    $('emptySlots').classList.add('d-none');
+    $('slotCards').innerHTML=slots.map(s=>`<div class="col-md-6 col-xl-4"><div class="slot-card h-100"><div class="d-flex justify-content-between gap-2"><span class="slot-key">${esc(s.slot_key)}</span><span class="badge bg-light text-dark border">P${Number(s.period)||''}</span></div><div class="fw-semibold small mt-1">${esc(s.display)}</div><div class="text-muted small">${esc(s.subject)}</div><ul class="mb-0 mt-1 ps-3">${(s.options||[]).map(o=>`<li class="option">${esc(o)}</li>`).join('')}</ul></div></div>`).join('');
+  }
+
+  function updateExportLink(){
+    const a=$('exportLink'); if(!currentClass||!currentVersion){ a.classList.add('disabled'); a.href='#'; return; }
+    a.classList.remove('disabled'); a.href='/api/admin/electives/export?class='+encodeURIComponent(currentClass)+'&version_id='+encodeURIComponent(currentVersion.id)+'&semester_id='+encodeURIComponent(currentSem()||'');
+  }
+
+  function renderAudit(logs){
+    if(!logs||!logs.length){ $('auditList').innerHTML='<div class="text-muted small">No elective changes yet.</div>'; return; }
+    $('auditList').innerHTML=logs.map(l=>{
+      const detail=(l.details||'')+(l.new_value?(' · '+l.new_value):'');
+      return `<div class="audit-row"><div class="d-flex justify-content-between gap-2"><span class="fw-semibold">${esc(l.action||'')}</span><span class="text-muted">${esc(l.ts||'')}</span></div><div class="text-muted">${esc(l.actor_name||l.actor_user||'system')}${l.entity_id?' · v/id '+esc(l.entity_id):''}</div><div>${esc(detail)}</div></div>`;
+    }).join('');
+  }
+
+  async function loadAudit(){
+    try{
+      const d=await erp.fetchJSON('/api/admin/audit?entity=electives&limit=12');
+      renderAudit(d.logs||[]);
+    }catch(e){ $('auditList').innerHTML='<div class="text-muted small">Audit unavailable.</div>'; }
+  }
+
+  async function loadClass(){
+    const cls=$('cls').value;
+    if(!cls){ msg('Select a class.','danger'); return; }
+    if(dirty && !confirm('Discard unsaved changes and load '+cls+'?')) return;
+    msg('Loading '+cls+'...');
+    try{
+      const selId=$('version').value;
+      let url='/api/admin/electives?class='+encodeURIComponent(cls)+'&semester_id='+encodeURIComponent(currentSem()||'');
+      if(selId) url+='&version_id='+encodeURIComponent(selId);
+      const d=await erp.fetchJSON(url);
+      currentClass=cls; currentVersion=d.version||null; versions=d.versions||[]; slots=d.slots||[]; students=d.students||[];
+      fillVersions(); renderSlots(); renderMatrix(); updateExportLink(); renderStats(d); setDirty(false);
+      await loadAudit();
+      msg('Loaded '+students.length+' students and '+slots.length+' elective slots for '+esc(cls)+(currentVersion?(' · v'+currentVersion.version_no):' · no version')+'.','success');
+    }catch(e){ msg('Could not load electives: '+esc(e.message||e),'danger'); }
+  }
+
+  function onCellChange(e){
+    const sel=e.target.closest('.elective-select'); if(!sel) return;
+    const sid=Number(sel.dataset.sid), sk=sel.dataset.slot;
+    const st=students.find(x=>Number(x.id)===sid); if(!st) return;
+    st.electives=st.electives||{}; st.electives[sk]=sel.value;
+    st.electives_source=st.electives_source||{}; st.electives_source[sk]='version';
+    setDirty(true); renderMatrix();
+  }
+
+  async function saveAll(){
+    if(!currentClass||!currentVersion||!students.length) return;
+    const mappings=[];
+    students.forEach(s=>{
+      const m=s.electives||{};
+      slots.forEach(sl=>mappings.push({student_id:Number(s.id),slot_key:key(sl),option_label:m[key(sl)]||''}));
+    });
+    $('saveBtn').disabled=true; msg('Saving mappings...');
+    try{
+      const d=await erp.fetchJSON('/api/admin/electives',{method:'POST',body:{class_name:currentClass,semester_id:currentSem(),version_id:Number(currentVersion.id),mappings}});
+      setDirty(false); msg(`Saved ${d.saved||0} mappings and cleared ${d.cleared||0} for v${currentVersion.version_no}.`,'success'); erp.toast('Elective mappings saved','success');
+      await loadClass();
+    }catch(e){
+      const errs=(e.data&&e.data.errors)||[e.message||'Save failed.'];
+      msg('<strong>Save failed</strong><ul class="mb-0 ps-3">'+errs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>','danger');
+    }finally{ $('saveBtn').disabled=!currentVersion; }
+  }
+
+  async function carryForward(){
+    if(!currentClass||!currentVersion) return;
+    if(!confirm('Copy missing mappings into v'+currentVersion.version_no+' from the previous version or legacy mappings?')) return;
+    $('carryBtn').disabled=true; msg('Carrying mappings forward...');
+    try{
+      const d=await erp.fetchJSON('/api/admin/electives/carry-forward',{method:'POST',body:{class_name:currentClass,semester_id:currentSem(),version_id:Number(currentVersion.id)}});
+      msg(`Carried ${d.copied||0} mappings${d.invalid?', '+d.invalid+' invalid':''}${d.skipped?', '+d.skipped+' skipped':''}.`,'success');
+      await loadClass();
+    }catch(e){ msg('Carry forward failed: '+esc(e.message||e),'danger'); }
+    finally{ $('carryBtn').disabled=!currentVersion; }
+  }
+
+  async function importCsv(file){
+    if(!file||!currentClass||!currentVersion) return;
+    const fd=new FormData(); fd.append('class_name',currentClass); fd.append('semester_id',currentSem()||''); fd.append('version_id',currentVersion.id); fd.append('file',file);
+    msg('Importing '+esc(file.name)+'...');
+    try{
+      const d=await erp.fetchJSON('/api/admin/electives/import',{method:'POST',body:fd});
+      const errs=d.errors||[];
+      msg(`Imported ${d.saved||0} mappings${errs.length?', '+errs.length+' errors':''} for v${currentVersion.version_no}.`,errs.length?'warning':'success');
+      if(errs.length){ const e=$('msg'); e.innerHTML+='<div class="mt-2"><strong>Errors</strong><ul class="mb-0 ps-3">'+errs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>'; }
+      await loadClass();
+    }catch(e){ msg('Import failed: '+esc(e.message||e),'danger'); }
+    finally{ $('importFile').value=''; }
+  }
+
+  $('loadBtn').addEventListener('click',loadClass);
+  $('cls').addEventListener('change',()=>{ $('version').innerHTML=''; currentVersion=null; loadClass(); });
+  $('sem').addEventListener('change',()=>{ $('version').innerHTML=''; currentVersion=null; loadClass(); });
+  $('version').addEventListener('change',loadClass);
+  $('saveBtn').addEventListener('click',saveAll);
+  $('carryBtn').addEventListener('click',carryForward);
+  $('matrixBody').addEventListener('change',onCellChange);
+  $('search').addEventListener('input',renderMatrix);
+  $('filterMapped').addEventListener('change',renderMatrix);
+  $('importFile').addEventListener('change',e=>importCsv(e.target.files[0]));
+  window.addEventListener('beforeunload',e=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
+  fillSemesters();
+  loadClass();
+})();
+</script>
+{% endblock %}
