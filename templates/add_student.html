@@ -1,24 +1,6 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Add Student</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-<div class="main-container">
-  <nav class="navbar navbar-expand-lg navbar-dark nav-gradient shadow-sm px-3 mb-4">
-    <div class="container-fluid">
-      <a class="navbar-brand fw-bold" href="/">Digital Attendance</a>
-      <div class="d-flex gap-2">
-        <a class="btn btn-outline-light btn-sm" href="/admin/students">Students</a>
-        <a class="btn btn-outline-light btn-sm" href="/">Dashboard</a>
-        <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
-      </div>
-    </div>
-  </nav>
+{% extends "base.html" %}
+{% block title %}Add Student{% endblock %}
+{% block content %}
   <div class="container" style="max-width:1080px">
     <div class="card p-4 shadow-sm glass-card">
       <h4 class="mb-1">Add Student (Full Details) + Face Capture</h4>
@@ -29,7 +11,7 @@
           <div class="col-md-2"><label class="form-label small">Roll No.</label><input class="form-control" name="roll"></div>
           <div class="col-md-3"><label class="form-label small">Register No. (login) *</label><input class="form-control" name="reg_no" required></div>
           <div class="col-md-3"><label class="form-label small">DOB (login) *</label><input class="form-control" type="date" name="dob" required></div>
-          <div class="col-md-3"><label class="form-label small">Class *</label><select class="form-select" name="class" required><option value="">Select</option>{% for c in classes %}<option value="{{c}}">{{c}}</option>{% endfor %}<option value="24IIT5A">24IIT5A</option><option value="24IIT5B">24IIT5B</option></select></div>
+          <div class="col-md-3"><label class="form-label small">Class *</label><select class="form-select" name="class" required><option value="">Select</option>{% for c in classes %}<option value="{{c}}">{{c}}</option>{% endfor %}</select></div>
           <div class="col-md-2"><label class="form-label small">Section</label><input class="form-control" name="sec"></div>
           <div class="col-md-2"><label class="form-label small">Gender</label><input class="form-control" name="gender"></div>
           <div class="col-md-2"><label class="form-label small">Blood Group</label><input class="form-control" name="blood_group"></div>
@@ -55,7 +37,7 @@
       </div>
     </div>
   </div>
-</div>
+{% endblock %}
+{% block scripts %}
 <script src="{{ url_for('static', filename='js/camera_add_student.js') }}"></script>
-</body>
-</html>
+{% endblock %}

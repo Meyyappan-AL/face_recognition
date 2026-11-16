@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}Notification Center{% endblock %}
+{% block head %}
+  <style>
+    .config-card{border:1px solid #e2e8f0;border-radius:.75rem;padding:.85rem;background:#fff;height:100%}
+    .config-card .name{font-weight:700;font-size:.9rem}
+    .config-card .detail{font-size:.74rem;color:#64748b;word-break:break-word}
+    .switch-table td,.switch-table th{vertical-align:middle;font-size:.82rem}
+    .switch-table .form-check-input{float:none;margin:0}
+    .outbox-table td,.outbox-table th{font-size:.76rem;vertical-align:middle}
+    .outbox-table .body-cell{max-width:260px;white-space:normal;word-break:break-word}
+    .status-pending{background:#fef3c7;color:#92400e}.status-sent{background:#dcfce7;color:#166534}.status-failed{background:#fee2e2;color:#991b1b}.status-skipped{background:#e2e8f0;color:#334155}
+  </style>
+{% endblock %}
+{% block content %}
+  <div class="container-fluid px-0">
+    <div id="msg" class="alert alert-light border py-2 small d-none"></div>
+
+    <div class="row g-3 mb-3" id="configCards">
+      <div class="col-md-4"><div class="config-card"><div class="d-flex justify-content-between"><span class="name">Email / SMTP</span><span class="badge bg-secondary" id="cfgEmail">-</span></div><div class="detail mt-1" id="cfgEmailDetail">Loading...</div></div></div>
+      <div class="col-md-4"><div class="config-card"><div class="d-flex justify-content-between"><span class="name">SMS / Fast2SMS</span><span class="badge bg-secondary" id="cfgSms">-</span></div><div class="detail mt-1" id="cfgSmsDetail">Loading...</div></div></div>
+      <div class="col-md-4"><div class="config-card"><div class="d-flex justify-content-between"><span class="name">Web Push</span><span class="badge bg-secondary" id="cfgPush">-</span></div><div class="detail mt-1" id="cfgPushDetail">Loading...</div></div></div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Pending</div><div class="value text-warning" id="kPending">-</div><div class="sub">outbox items</div></div></div>
+      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Sent</div><div class="value text-success" id="kSent">-</div><div class="sub">delivered / accepted</div></div></div>
+      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Failed</div><div class="value text-danger" id="kFailed">-</div><div class="sub">needs retry/config</div></div></div>
+      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Push subscriptions</div><div class="value text-primary" id="kPushSubs">-</div><div class="sub">active devices</div></div></div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-xl-7">
+        <div class="card erp-card p-3 h-100">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <div><h6 class="erp-section-title mb-1">Channel & Event Settings</h6><div class="erp-muted">Master switches and per-event delivery rules.</div></div>
+            <button id="saveSettingsBtn" class="btn btn-success btn-sm" type="button">Save Settings</button>
+          </div>
+          <div class="erp-table-wrap">
+            <table class="table table-sm switch-table mb-0">
+              <thead><tr><th>Channel</th><th class="text-center">Master</th><th class="text-center">Absent</th><th class="text-center">OD</th><th class="text-center">Low attendance</th></tr></thead>
+              <tbody>
+                <tr><td><strong>Email</strong></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="notify_email"></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="email_absent"></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="email_od"></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="email_low_attendance"></td>
+                </tr>
+                <tr><td><strong>SMS</strong></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="notify_sms"></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="sms_absent"></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="sms_od"></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="sms_low_attendance"></td>
+                </tr>
+                <tr><td><strong>Push</strong></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="notify_push"></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="push_absent"></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="push_od"></td>
+                  <td class="text-center"><input class="form-check-input" type="checkbox" id="push_low_attendance"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="row g-2 mt-2">
+            <div class="col-md-7">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="low_attendance_alerts">
+                <label class="form-check-label small" for="low_attendance_alerts">Generate low-attendance alerts</label>
+              </div>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label small mb-1">Cooldown days</label>
+              <input id="low_attendance_cooldown_days" type="number" min="1" max="365" class="form-control form-control-sm">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-xl-5">
+        <div class="card erp-card p-3 mb-3">
+          <h6 class="erp-section-title mb-2">Outbox Actions</h6>
+          <div class="d-grid gap-2">
+            <button id="processBtn" class="btn btn-primary btn-sm" type="button">Process Pending Now</button>
+            <button id="refreshBtn" class="btn btn-outline-dark btn-sm" type="button">Refresh All Data</button>
+          </div>
+          <div class="erp-muted mt-2">The background worker checks every 30 seconds once at least one channel is configured. Use Process Pending Now for an immediate attempt.</div>
+        </div>
+        <div class="card erp-card p-3">
+          <h6 class="erp-section-title mb-2">Send Test Message</h6>
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label small mb-1">Channel</label>
+              <select id="testChannel" class="form-select form-select-sm"><option value="email">Email</option><option value="sms">SMS</option><option value="push">Push</option></select>
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1">Student ID</label>
+              <input id="testStudentId" type="number" min="1" class="form-control form-control-sm" placeholder="e.g. 7">
+            </div>
+          </div>
+          <button id="testBtn" class="btn btn-outline-primary btn-sm w-100 mt-2" type="button">Send Test</button>
+          <div class="erp-muted mt-2">Student IDs are shown in the outbox and alerts below. Email uses the student email; SMS uses student/guardian phone.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card erp-card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <div><h6 class="erp-section-title mb-1">Notification Outbox</h6><div class="erp-muted">Latest 200 queued messages.</div></div>
+        <div class="d-flex gap-2">
+          <select id="filterStatus" class="form-select form-select-sm"><option value="">All statuses</option><option value="pending">Pending</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="skipped">Skipped</option></select>
+          <select id="filterChannel" class="form-select form-select-sm"><option value="">All channels</option><option value="email">Email</option><option value="sms">SMS</option><option value="push">Push</option></select>
+        </div>
+      </div>
+      <div class="erp-table-wrap">
+        <table class="table table-hover outbox-table mb-0">
+          <thead><tr><th>#</th><th>Student</th><th>Channel</th><th>Event</th><th>Recipient</th><th>Subject / Error</th><th>Status</th><th>Attempts</th><th>Created</th><th class="text-end">Action</th></tr></thead>
+          <tbody id="outboxBody"><tr><td colspan="10" class="text-center text-muted py-4">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-xl-7">
+        <div class="card erp-card p-3">
+          <h6 class="erp-section-title mb-2">Recent Student Alerts</h6>
+          <div class="erp-table-wrap">
+            <table class="table table-hover outbox-table mb-0">
+              <thead><tr><th>#</th><th>Student</th><th>Type</th><th>Title</th><th>Read</th><th>Created</th></tr></thead>
+              <tbody id="alertsBody"><tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="col-xl-5">
+        <div class="card erp-card p-3">
+          <h6 class="erp-section-title mb-2">Environment Variables</h6>
+          <div class="erp-muted mb-2">Set these in `.env`. Never enter real secrets into this page.</div>
+          <pre class="small bg-light border rounded p-2 mb-2" style="white-space:pre-wrap">SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
+SMTP_FROM, SMTP_SSL, SMTP_TLS
+FAST2SMS_API_KEY, FAST2SMS_ROUTE, FAST2SMS_SENDER_ID
+VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT</pre>
+          <div class="small text-muted">Email needs SMTP_HOST plus SMTP_FROM or SMTP_USER. SMS needs FAST2SMS_API_KEY. Push needs both VAPID keys and the `pywebpush` package.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  let outbox=[], alerts=[];
+  const settingIds=['notify_email','notify_sms','notify_push','email_absent','email_od','email_low_attendance','sms_absent','sms_od','sms_low_attendance','push_absent','push_od','push_low_attendance','low_attendance_alerts'];
+
+  function msg(t,type='info'){
+    const e=$('msg'); if(!t){ e.classList.add('d-none'); e.innerHTML=''; return; }
+    e.className='alert alert-'+(type==='danger'?'danger':type==='success'?'success':type==='warning'?'warning':'light border')+' py-2 small';
+    e.innerHTML=t;
+  }
+  function onOff(v){ return String(v??'1') !== '0'; }
+  function setConfigCard(code,key,detailId){
+    const c=code||{}; const badge=$(key); const detail=$(detailId);
+    badge.textContent=c.configured?'Configured':'Not configured';
+    badge.className='badge '+(c.configured?'bg-success':'bg-secondary');
+    detail.textContent=c.detail||'';
+  }
+  function statusClass(st){
+    st=(st||'').toLowerCase();
+    return st==='sent'?'status-sent':st==='failed'?'status-failed':st==='skipped'?'status-skipped':'status-pending';
+  }
+  function renderCounts(counts){
+    counts=counts||{};
+    $('kPending').textContent=counts.pending||0;
+    $('kSent').textContent=counts.sent||0;
+    $('kFailed').textContent=counts.failed||0;
+  }
+  function renderOutbox(){
+    const fs=$('filterStatus').value, fc=$('filterChannel').value;
+    const rows=outbox.filter(x=>(!fs||(x.status||'')===fs)&&(!fc||(x.channel||'')===fc));
+    if(!rows.length){ $('outboxBody').innerHTML='<tr><td colspan="10" class="text-center text-muted py-4">No outbox items match this view.</td></tr>'; return; }
+    $('outboxBody').innerHTML=rows.map(x=>{
+      const canRetry=(x.status==='failed'||x.status==='skipped');
+      return `<tr>
+        <td>${Number(x.id)||''}</td>
+        <td>${esc(x.student_id??'-')}</td>
+        <td><span class="badge bg-light text-dark border text-uppercase">${esc(x.channel||'')}</span></td>
+        <td>${esc(x.event_type||'')}</td>
+        <td class="body-cell">${esc(x.recipient||'')}</td>
+        <td class="body-cell"><div class="fw-semibold">${esc(x.subject||'')}</div>${x.last_error?`<div class="text-danger">${esc(x.last_error)}</div>`:''}</td>
+        <td><span class="status-pill ${statusClass(x.status)}">${esc(x.status||'')}</span></td>
+        <td>${Number(x.attempts)||0}</td>
+        <td class="text-nowrap">${esc((x.created_at||'').slice(0,19).replace('T',' '))}</td>
+        <td class="text-end">${canRetry?`<button class="btn btn-outline-warning btn-sm" data-retry="${Number(x.id)}">Retry</button>`:''}</td>
+      </tr>`;
+    }).join('');
+  }
+  function renderAlerts(){
+    if(!alerts.length){ $('alertsBody').innerHTML='<tr><td colspan="6" class="text-center text-muted py-3">No student alerts yet.</td></tr>'; return; }
+    $('alertsBody').innerHTML=alerts.map(a=>`<tr>
+      <td>${Number(a.id)||''}</td><td>${esc(a.student_id??'')}</td><td><span class="badge bg-light text-dark border">${esc(a.alert_type||'')}</span></td>
+      <td class="body-cell">${esc(a.title||'')}</td>
+      <td>${a.read_at?'<span class="badge bg-success">Read</span>':'<span class="badge bg-warning text-dark">Unread</span>'}</td>
+      <td class="text-nowrap">${esc((a.created_at||'').slice(0,19).replace('T',' '))}</td>
+    </tr>`).join('');
+  }
+
+  async function load(){
+    try{
+      const d=await erp.fetchJSON('/api/admin/notifications');
+      setConfigCard(d.config?.email,'cfgEmail','cfgEmailDetail');
+      setConfigCard(d.config?.sms,'cfgSms','cfgSmsDetail');
+      setConfigCard(d.config?.push,'cfgPush','cfgPushDetail');
+      const s=d.settings||{};
+      settingIds.forEach(id=>{ if($(id)) $(id).checked=onOff(s[id]); });
+      $('low_attendance_cooldown_days').value=s.low_attendance_cooldown_days||'7';
+      outbox=d.outbox||[]; alerts=d.alerts||[];
+      $('kPushSubs').textContent=Number(d.push_subscriptions)||0;
+      renderCounts(d.counts||{}); renderOutbox(); renderAlerts();
+    }catch(e){ msg('Could not load notification data: '+esc(e.message||e),'danger'); }
+  }
+
+  async function saveSettings(){
+    const payload={};
+    settingIds.forEach(id=>{ if($(id)) payload[id]=$(id).checked?'1':'0'; });
+    payload.low_attendance_cooldown_days=$('low_attendance_cooldown_days').value||'7';
+    $('saveSettingsBtn').disabled=true; msg('Saving notification settings...');
+    try{
+      await erp.fetchJSON('/api/admin/notifications/settings',{method:'POST',body:payload});
+      msg('Notification settings saved.','success'); erp.toast('Notification settings saved','success'); await load();
+    }catch(e){ msg('Save failed: '+esc(e.message||e),'danger'); }
+    finally{ $('saveSettingsBtn').disabled=false; }
+  }
+
+  async function processNow(){
+    $('processBtn').disabled=true; msg('Processing pending outbox...');
+    try{
+      const d=await erp.fetchJSON('/api/admin/notifications/process',{method:'POST',body:{}});
+      msg(`Processed ${d.processed||0}: ${d.sent||0} sent, ${d.failed||0} failed, ${d.skipped||0} skipped.`,(d.failed?'warning':'success'));
+      await load();
+    }catch(e){ msg('Process failed: '+esc(e.message||e),'danger'); }
+    finally{ $('processBtn').disabled=false; }
+  }
+
+  async function retry(id){
+    try{
+      const d=await erp.fetchJSON('/api/admin/notifications/retry/'+id,{method:'POST',body:{}});
+      msg(`Retry #${id}: ${d.sent||0} sent, ${d.failed||0} failed, ${d.skipped||0} skipped.`,(d.failed?'warning':'success'));
+      await load();
+    }catch(e){ msg('Retry failed: '+esc(e.message||e),'danger'); }
+  }
+
+  async function testSend(){
+    const sid=Number($('testStudentId').value); const channel=$('testChannel').value;
+    if(!sid){ msg('Enter a student ID for the test.','danger'); return; }
+    $('testBtn').disabled=true; msg('Sending '+channel+' test...');
+    try{
+      const d=await erp.fetchJSON('/api/admin/notifications/test',{method:'POST',body:{channel,kind:'test',student_id:sid}});
+      msg(esc(d.message||'Test sent.'),'success');
+    }catch(e){ msg('Test failed: '+esc(e.message||e),'danger'); }
+    finally{ $('testBtn').disabled=false; }
+  }
+
+  $('saveSettingsBtn').addEventListener('click',saveSettings);
+  $('processBtn').addEventListener('click',processNow);
+  $('testBtn').addEventListener('click',testSend);
+  $('refreshBtn').addEventListener('click',load);
+  $('filterStatus').addEventListener('change',renderOutbox);
+  $('filterChannel').addEventListener('change',renderOutbox);
+  $('outboxBody').addEventListener('click',e=>{ const b=e.target.closest('[data-retry]'); if(b) retry(Number(b.dataset.retry)); });
+  load();
+})();
+</script>
+{% endblock %}

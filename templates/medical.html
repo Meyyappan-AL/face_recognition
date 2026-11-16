@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}Medical Leave{% endblock %}
+{% block head %}
+  <style>.scope-box{display:none}.pill{font-size:.75rem}</style>
+{% endblock %}
+{% block content %}
+  <div class="container" style="max-width:1150px">
+    <div class="alert alert-secondary small">
+      <strong>Medical leave rules:</strong>
+      <ul class="mb-0 ps-3">
+        <li>One active request per semester. You may resubmit after rejection or cancellation.</li>
+        <li>Full day is the default. You may optionally limit the request to specific periods.</li>
+        <li>A medical certificate is mandatory (PDF, JPG, PNG, or WEBP).</li>
+        <li>Class Advisor approval is followed by final HOD approval. Approved leave is credited as <strong>Medical Leave</strong> and counts toward attendance percentage.</li>
+        <li>Contact your class advisor through the card below. There are no online medical-leave notifications for this workflow.</li>
+      </ul>
+    </div>
+
+    {% if session.get('role')=='student' %}
+    <div class="row g-3">
+      <div class="col-lg-8">
+        <div class="card p-3 shadow-sm glass-card mb-3">
+          <h5>Request Medical Leave</h5>
+          <form id="medicalForm" enctype="multipart/form-data">
+            <div class="row g-2">
+              <div class="col-md-3"><label class="form-label small">From Date *</label><input class="form-control form-control-sm" type="date" name="from_date" id="medFrom" value="{{ today }}" required></div>
+              <div class="col-md-3"><label class="form-label small">To Date</label><input class="form-control form-control-sm" type="date" name="to_date" id="medTo" value="{{ today }}"></div>
+              <div class="col-md-6"><label class="form-label small">Scope *</label>
+                <select class="form-select form-select-sm" name="scope_type" id="medScope">
+                  <option value="full_day">Full Day (all periods 1-7, default)</option>
+                  <option value="specific">Only selected periods</option>
+                </select>
+              </div>
+              <div class="col-12 scope-box" id="medSpecificBox">
+                <label class="form-label small">Select periods (applied to each leave date)</label>
+                <div class="d-flex flex-wrap gap-3">
+                  {% for p in range(1,8) %}<label class="form-check form-check-inline small"><input class="form-check-input med-period-cb" type="checkbox" value="{{p}}"> P{{p}}</label>{% endfor %}
+                </div>
+                <input type="hidden" name="periods_json" id="medPeriodsJson">
+              </div>
+              <div class="col-12"><label class="form-label small">Reason / Diagnosis summary *</label><textarea class="form-control form-control-sm" name="reason" rows="2" required placeholder="Brief reason for medical leave"></textarea></div>
+              <div class="col-md-8"><label class="form-label small">Medical Certificate *</label><input class="form-control form-control-sm" type="file" name="certificate" accept=".pdf,.jpg,.jpeg,.png,.webp" required></div>
+              <div class="col-md-4 d-grid align-items-end"><button class="btn btn-primary btn-sm" type="submit">Submit Medical Request</button></div>
+            </div>
+          </form>
+          <div id="medMsg" class="small mt-2"></div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="card p-3 shadow-sm glass-card">
+          <h5>Contact Class Advisor</h5>
+          <div class="small text-muted mb-2">For medical leave follow-up, contact your advisor directly. This ERP does not send online medical-leave notifications.</div>
+          <div class="border rounded p-2 bg-white small">
+            <div class="fw-semibold">{{ advisor_contact.name or 'Class Advisor' }}</div>
+            <div class="text-muted">{{ advisor_contact.code or '-' }}</div>
+            {% if advisor_contact.phone %}<div>Phone: <a href="tel:{{ advisor_contact.phone }}">{{ advisor_contact.phone }}</a></div>{% endif %}
+            {% if advisor_contact.email %}<div>Email: <a href="mailto:{{ advisor_contact.email }}">{{ advisor_contact.email }}</a></div>{% endif %}
+            {% if not advisor_contact.phone and not advisor_contact.email %}<div class="text-muted mt-1">Phone/email not on file. Use the advisor code shown above.</div>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card p-3 shadow-sm glass-card">
+      <div class="d-flex justify-content-between align-items-center mb-2"><h5 class="mb-0">My Medical Requests</h5><button class="btn btn-outline-secondary btn-sm" id="reloadMyMedical">Refresh</button></div>
+      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>ID</th><th>Class</th><th>Dates / Scope</th><th>Reason</th><th>Status</th><th>Advisor</th><th>HOD</th><th>Certificate</th><th>Action</th></tr></thead><tbody id="myMedicalBody"><tr><td colspan="9" class="small text-muted">Loading...</td></tr></tbody></table></div>
+    </div>
+    {% else %}
+    <div class="card p-3 shadow-sm glass-card">
+      <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <div><h5 class="mb-0">Medical Leave Requests (Review)</h5><div id="medViewerNote" class="small text-muted"></div></div>
+        <button id="refreshMedical" class="btn btn-outline-secondary btn-sm">Refresh</button>
+      </div>
+      <p class="small text-muted mb-2"><strong>Class Advisor:</strong> approve/reject pending requests for your own class. <strong>HOD:</strong> final approve/reject after advisor approval, or cancel approved leave until the leave period is over. <strong>Admin is not involved.</strong></p>
+      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>ID</th><th>Student</th><th>Class</th><th>Dates / Scope</th><th>Reason</th><th>Status</th><th>Certificate</th><th>Action</th></tr></thead><tbody id="medPendingBody"><tr><td colspan="8" class="small text-muted">Loading...</td></tr></tbody></table></div>
+      <div id="medReviewMsg" class="small mt-2"></div>
+    </div>
+
+    <div class="card p-3 shadow-sm glass-card mt-3">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <div><h5 class="mb-0">Medical Leave History</h5><div class="small text-muted">HOD/Admin see all; Advisor sees own class.</div></div>
+        <button id="reloadMedHist" class="btn btn-outline-secondary btn-sm">Refresh</button>
+      </div>
+      <div class="row g-2 mb-2">
+        <div class="col-6 col-md-2"><select id="medHistClass" class="form-select form-select-sm"><option value="">All classes</option>{% for c in classes %}<option>{{ c }}</option>{% endfor %}</select></div>
+        <div class="col-6 col-md-2"><select id="medHistStatus" class="form-select form-select-sm"><option value="">All status</option><option value="pending_advisor">Pending Advisor</option><option value="advisor_approved">Awaiting HOD</option><option value="medical_approved">Approved</option><option value="cancelled">Cancelled/Rejected</option></select></div>
+        <div class="col-6 col-md-2"><input type="date" id="medHistFrom" class="form-control form-control-sm" title="From"></div>
+        <div class="col-6 col-md-2"><input type="date" id="medHistTo" class="form-control form-control-sm" title="To"></div>
+        <div class="col-8 col-md-2"><input id="medHistQ" class="form-control form-control-sm" placeholder="Name/Reg/ID"></div>
+        <div class="col-4 col-md-2 d-grid"><button id="applyMedHist" class="btn btn-primary btn-sm">Apply</button></div>
+      </div>
+      <div id="medHistCounts" class="small text-muted mb-2"></div>
+      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>ID</th><th>Student</th><th>Class</th><th>Dates / Scope</th><th>Status</th><th>Advisor</th><th>HOD</th><th>Certificate</th><th>Updated</th></tr></thead><tbody id="medHistBody"><tr><td colspan="9" class="small text-muted">Loading...</td></tr></tbody></table></div>
+    </div>
+    {% endif %}
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $=id=>document.getElementById(id);
+function esc(s){return (s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function medMsg(t,c='text-muted',id='medMsg'){const el=$(id); if(el){el.className='small mt-2 '+c; el.textContent=t;}}
+function badge(st){const m={medical_approved:'bg-success',cancelled:'bg-danger',advisor_approved:'bg-info text-dark',pending_advisor:'bg-warning text-dark'}; return `<span class="badge ${m[st]||'bg-secondary'}">${esc(st)}</span>`}
+function scopeText(x){try{const p=JSON.parse(x.periods_json||'[]'); if(x.day_wise) return 'Full day (1-7)'; if(Array.isArray(p)&&p.length) return 'Periods '+p.join(',');}catch(e){} return x.day_wise?'Full day':'Period(s)';}
+function certLink(x){return x.certificate_name?`<a class="btn btn-outline-secondary btn-sm" href="/api/medical/certificate/${x.id}">Certificate</a>`:'<span class="small text-muted">-</span>';}
+{% if session.get('role')=='student' %}
+const medScope=$('medScope'), medSpecificBox=$('medSpecificBox');
+medScope?.addEventListener('change',()=>{medSpecificBox.style.display=medScope.value==='specific'?'block':'none';});
+async function loadMy(){
+  const box=$('myMedicalBody'); box.innerHTML='<tr><td colspan="9" class="small text-muted">Loading...</td></tr>';
+  try{
+    const r=await fetch('/api/medical/my',{credentials:'same-origin'}); const d=await r.json();
+    const rows=d.requests||[];
+    box.innerHTML=rows.length?rows.map(x=>{
+      const rej=(x.advisor_decision==='rejected'?x.advisor_note:'')||(x.hod_decision==='rejected'?x.hod_note:'')||(x.hod_decision==='cancelled'?x.hod_note:'')||'';
+      const canCancel=(x.status==='pending_advisor'||x.status==='advisor_approved');
+      const cancelBtn=canCancel?`<button class="btn btn-outline-danger btn-sm" onclick="cancelMedical(${x.id})">Cancel</button>`:'';
+      return `<tr><td>${x.id}</td><td>${esc(x.class_name||'')}</td><td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' to '+esc(x.to_date):''}<div class="text-muted">${esc(scopeText(x))}</div></td><td class="small">${esc(x.reason)}</td><td>${badge(x.status)}<div class="small text-muted">${esc(x.status_label||'')}</div>${rej?`<div class="small text-danger">Message: ${esc(rej)}</div>`:''}</td><td class="small">${esc(x.advisor_decision||'-')}${x.advisor_note?`<div class="text-muted">${esc(x.advisor_note)}</div>`:''}</td><td class="small">${esc(x.hod_decision_display||x.hod_decision||'-')}${x.hod_note?`<div class="text-muted">${esc(x.hod_note)}</div>`:''}</td><td class="small">${certLink(x)}</td><td>${cancelBtn}</td></tr>`;
+    }).join(''):'<tr><td colspan="9" class="small text-muted">No medical leave requests.</td></tr>';
+  }catch(e){box.innerHTML='<tr><td colspan="9" class="small text-danger">Could not load medical leave requests.</td></tr>';}
+}
+$('medicalForm')?.addEventListener('submit',async e=>{
+  e.preventDefault(); medMsg('Submitting medical leave request...');
+  try{
+    if(medScope.value==='specific'){
+      const ps=[...document.querySelectorAll('.med-period-cb:checked')].map(x=>x.value);
+      if(!ps.length){medMsg('Select at least one period or choose Full Day.','text-danger'); return;}
+      $('medPeriodsJson').value=ps.join(',');
+    } else $('medPeriodsJson').value='';
+    const fd=new FormData(e.target);
+    const r=await fetch('/api/medical/request',{method:'POST',body:fd,credentials:'same-origin'});
+    let d={}; try{ d=await r.json(); }catch(_){ d={error:'Server returned non-JSON response (HTTP '+r.status+')'}; }
+    if(r.ok&&d.ok){medMsg(d.message||'Submitted','text-success'); e.target.reset(); medSpecificBox.style.display='none'; $('medFrom').value='{{ today }}'; $('medTo').value='{{ today }}'; loadMy();}
+    else medMsg(d.error||('Submit failed (HTTP '+r.status+')'),'text-danger');
+  }catch(err){medMsg('Submit error: '+(err&&err.message?err.message:err),'text-danger');}
+});
+window.cancelMedical=async (request_id)=>{
+  if(!confirm('Cancel this medical leave request? You may submit a new one for this semester.')) return;
+  medMsg('Cancelling...');
+  try{
+    const r=await fetch('/api/medical/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id}),credentials:'same-origin'});
+    const d=await r.json();
+    if(r.ok&&d.ok){medMsg(d.message||'Cancelled','text-success'); loadMy();}
+    else medMsg(d.error||'Could not cancel','text-danger');
+  }catch(e){medMsg('Cancel error: '+(e.message||e),'text-danger');}
+};
+$('reloadMyMedical')?.addEventListener('click',loadMy);
+loadMy();
+{% else %}
+async function loadPending(){
+  medMsg('Loading...','text-muted','medReviewMsg');
+  const box=$('medPendingBody'); box.innerHTML='<tr><td colspan="8" class="small text-muted">Loading...</td></tr>';
+  try{
+    const r=await fetch('/api/medical/pending',{credentials:'same-origin'}); const d=await r.json(); const rows=d.requests||[];
+    $('medViewerNote').textContent=d.note ? d.note : (d.viewer_role==='advisor' ? 'Showing your class requests pending advisor approval.' : d.viewer_role==='hod' ? 'Showing requests pending HOD final approval and approved leave eligible for cancellation.' : '');
+    box.innerHTML=rows.length?rows.map(x=>{
+      const acts=(x.allowed_actions||[]); let btns='';
+      if(acts.includes('advisor_approve')) btns+=`<button class="btn btn-success btn-sm" onclick="reviewMedical(${x.id},'advisor_approve',false)">Approve</button> `;
+      if(acts.includes('advisor_reject')) btns+=`<button class="btn btn-danger btn-sm" onclick="reviewMedical(${x.id},'advisor_reject',true)">Reject</button> `;
+      if(acts.includes('hod_approve')) btns+=`<button class="btn btn-success btn-sm" onclick="reviewMedical(${x.id},'hod_approve',false)">Approve (Final)</button> `;
+      if(acts.includes('hod_reject')) btns+=`<button class="btn btn-danger btn-sm" onclick="reviewMedical(${x.id},'hod_reject',true)">Reject</button> `;
+      if(acts.includes('hod_cancel')) btns+=`<button class="btn btn-warning btn-sm" onclick="reviewMedical(${x.id},'hod_cancel',true)">Cancel Leave (HOD)</button> `;
+      if(!btns) btns='<span class="small text-muted">No action</span>';
+      return `<tr><td>${x.id}</td><td>${esc(x.student_name)}<div class="small text-muted">${esc(x.reg_no||'')}</div></td><td>${esc(x.class_name)}</td><td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' to '+esc(x.to_date):''}<div class="text-muted">${esc(scopeText(x))}</div></td><td class="small">${esc(x.reason)}${(x.advisor_decision||x.hod_decision)?`<div class="text-muted">Adv: ${esc(x.advisor_decision||'-')} | HOD: ${esc(x.hod_decision_display||x.hod_decision||'-')}</div>`:''}</td><td>${badge(x.status)}<div class="small text-muted">${esc(x.status_label||'')}</div></td><td>${certLink(x)}</td><td><div class="d-flex gap-1 flex-wrap">${btns}</div></td></tr>`;
+    }).join(''):'<tr><td colspan="8" class="small text-muted">No requests in your scope.</td></tr>';
+    medMsg('','text-muted','medReviewMsg');
+  }catch(e){box.innerHTML='<tr><td colspan="8" class="small text-danger">Could not load review queue.</td></tr>';}
+}
+window.reviewMedical=async (request_id,action,isReject)=>{
+  let note='';
+  if(isReject){ note = prompt('Message/reason (optional, shown to student):') ?? ''; }
+  else { note = prompt('Approval note (optional):') || ''; }
+  medMsg('Updating...','text-muted','medReviewMsg');
+  try{
+    const r=await fetch('/api/medical/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id,action,note}),credentials:'same-origin'});
+    const d=await r.json();
+    if(r.ok&&d.ok){medMsg(d.message||('Updated: '+action),'text-success','medReviewMsg'); loadPending(); loadMedicalHistory();}
+    else medMsg(d.error||'Failed','text-danger','medReviewMsg');
+  }catch(e){medMsg('Review error: '+(e.message||e),'text-danger','medReviewMsg');}
+};
+async function loadMedicalHistory(){
+  const p=new URLSearchParams();
+  const cls=$('medHistClass').value, st=$('medHistStatus').value, f=$('medHistFrom').value, t=$('medHistTo').value, q=$('medHistQ').value.trim();
+  if(cls) p.set('class',cls); if(st) p.set('status',st); if(f) p.set('from',f); if(t) p.set('to',t); if(q) p.set('q',q);
+  $('medHistBody').innerHTML='<tr><td colspan="9" class="small text-muted">Loading...</td></tr>';
+  try{
+    const r=await fetch('/api/medical/history?'+p.toString(),{credentials:'same-origin'}); const d=await r.json();
+    if(d.note){ $('medHistCounts').textContent=d.note; $('medHistBody').innerHTML='<tr><td colspan="9" class="small text-muted">No access.</td></tr>'; return; }
+    const c=d.counts||{}; $('medHistCounts').textContent=`Pending Advisor: ${c.pending_advisor||0} | Awaiting HOD: ${c.advisor_approved||0} | Approved: ${c.medical_approved||0} | Cancelled: ${c.cancelled||0}`;
+    const rows=d.requests||[];
+    $('medHistBody').innerHTML=rows.length?rows.map(x=>`<tr><td>${x.id}</td><td>${esc(x.student_name)}<div class="small text-muted">${esc(x.reg_no||'')}</div></td><td>${esc(x.class_name)}</td><td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' to '+esc(x.to_date):''}<div class="text-muted">${esc(scopeText(x))}</div></td><td>${badge(x.status)}<div class="small text-muted">${esc(x.status_label||'')}</div></td><td class="small">${esc(x.advisor_decision||'-')}</td><td class="small">${esc(x.hod_decision_display||x.hod_decision||'-')}</td><td>${certLink(x)}</td><td class="small text-muted">${esc((x.updated_at||'').slice(0,19).replace('T',' '))}</td></tr>`).join(''):'<tr><td colspan="9" class="small text-muted">No medical leave history for these filters.</td></tr>';
+  }catch(e){$('medHistBody').innerHTML='<tr><td colspan="9" class="small text-danger">Could not load medical leave history.</td></tr>';}
+}
+$('refreshMedical')?.addEventListener('click',loadPending);
+$('applyMedHist')?.addEventListener('click',loadMedicalHistory);
+$('reloadMedHist')?.addEventListener('click',loadMedicalHistory);
+loadPending(); loadMedicalHistory();
+{% endif %}
+</script>
+{% endblock %}

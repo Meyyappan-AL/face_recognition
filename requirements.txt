@@ -1,0 +1,9 @@
+Flask>=2.3
+Werkzeug>=2.3
+python-dotenv>=1.0
+opencv-python>=4.8
+numpy>=1.24
+scikit-learn>=1.3
+pywebpush>=2.0
+# Optional: improves face detection if installed; Haar fallback is built in.
+# mediapipe>=0.10

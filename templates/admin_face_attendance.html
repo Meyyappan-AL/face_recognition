@@ -1,0 +1,191 @@
+{% extends 'base.html' %}
+{% block title %}Face Attendance | Attendance ERP{% endblock %}
+{% block head %}
+<style>
+  .face-camera { width:100%; max-width:520px; aspect-ratio:4/3; background:#0f172a; border-radius:.6rem; object-fit:cover; }
+  .face-crop { width:74px; height:74px; object-fit:cover; border-radius:.45rem; border:1px solid #dee2e6; background:#f8f9fa; }
+  .face-unknown-card { min-width:160px; max-width:190px; }
+  .face-stat { font-size:.78rem; color:#6c757d; text-transform:uppercase; letter-spacing:.03em; }
+  .face-flag { outline:2px solid #ffc107; }
+  .face-match-row { background:#f0fff4; }
+  .face-table td, .face-table th { vertical-align:middle; }
+  .face-status-btn { min-width:72px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-2 px-md-3 pb-5">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <h4 class="mb-1">Admin Face Attendance</h4>
+      <div class="text-muted small">Local-only webcam capture or video processing. Review every match before submitting the attendance draft.</div>
+    </div>
+    <div class="d-flex gap-2 align-items-center">
+      <span id="faceModelBadge" class="badge bg-secondary">Checking model...</span>
+      <button class="btn btn-outline-secondary btn-sm" id="faceRefreshBtn" type="button">Refresh</button>
+    </div>
+  </div>
+
+  <div id="faceAlertHost"></div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-3">
+          <label class="form-label small fw-semibold" for="faceClass">Class</label>
+          <select id="faceClass" class="form-select form-select-sm">
+            {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label small fw-semibold" for="faceDate">Date</label>
+          <input id="faceDate" type="date" class="form-control form-control-sm" value="{{ today }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label small fw-semibold" for="facePeriod">Period</label>
+          <select id="facePeriod" class="form-select form-select-sm">
+            {% for p in range(1, 9) %}<option value="{{ p }}">Period {{ p }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-12 col-md-5">
+          <div id="faceCellInfo" class="small text-muted">Select class, date and period to see the scheduled subject.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="nav nav-pills nav-fill mb-2" id="faceTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="webcamTabBtn" data-bs-toggle="pill" data-bs-target="#webcamTab" type="button" role="tab">Webcam (one student at a time)</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="videoTabBtn" data-bs-toggle="pill" data-bs-target="#videoTab" type="button" role="tab">Upload Video</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="historyTabBtn" data-bs-toggle="pill" data-bs-target="#historyTab" type="button" role="tab">Recent Jobs</button>
+    </li>
+  </ul>
+
+  <div class="tab-content mb-3">
+    <div class="tab-pane fade show active" id="webcamTab" role="tabpanel">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-12 col-lg-7">
+              <video id="faceVideo" class="face-camera" autoplay playsinline muted></video>
+              <div class="d-flex flex-wrap gap-2 mt-2">
+                <button class="btn btn-primary btn-sm" id="faceCameraStart" type="button">Start Webcam Job</button>
+                <button class="btn btn-success btn-sm" id="faceCaptureBtn" type="button" disabled>Capture Face</button>
+                <button class="btn btn-outline-danger btn-sm" id="faceCameraStop" type="button" disabled>Stop Camera</button>
+              </div>
+              <div class="small text-muted mt-2">Allow camera access, keep one student in frame, then capture. Each capture is matched against the trained local model and added to the draft below.</div>
+            </div>
+            <div class="col-12 col-lg-5">
+              <div id="webcamJobBox" class="border rounded p-3 bg-light h-100">
+                <div class="face-stat">Current webcam job</div>
+                <div id="webcamJobState" class="fw-semibold mb-2">No active job</div>
+                <div id="webcamCaptures" class="small text-muted">Captures will appear here.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="videoTab" role="tabpanel">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-12 col-lg-7">
+              <label class="form-label small fw-semibold" for="faceVideoFile">Classroom video</label>
+              <input id="faceVideoFile" type="file" class="form-control" accept=".mp4,.avi,.mov,.mkv,.m4v,.wmv">
+              <div class="form-text">Maximum {{ face_cfg.maxVideoMb }} MB. The uploaded video is processed locally and deleted after you complete the review.</div>
+              <div class="progress mt-3" style="height:18px">
+                <div id="faceUploadProgress" class="progress-bar" style="width:0%">0%</div>
+              </div>
+              <button class="btn btn-primary btn-sm mt-2" id="faceVideoUpload" type="button">Upload and Process</button>
+              <div id="faceVideoHint" class="small text-muted mt-2">Sampling at {{ face_cfg.sampleFps }} frame(s) per second, up to {{ face_cfg.maxVideoFaces }} faces per sampled frame. Multiple faces are deduplicated into one row per student.</div>
+            </div>
+            <div class="col-12 col-lg-5">
+              <div id="videoJobBox" class="border rounded p-3 bg-light h-100">
+                <div class="face-stat">Video processing</div>
+                <div id="videoJobState" class="fw-semibold mb-2">No active video job</div>
+                <div class="progress mb-2" style="height:14px"><div id="videoJobProgress" class="progress-bar" style="width:0%">0%</div></div>
+                <div id="videoJobDetails" class="small text-muted">Unknown and low-confidence faces will be flagged for review.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="historyTab" role="tabpanel">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead><tr><th>Job</th><th>Source</th><th>Class</th><th>Date / Period</th><th>Status</th><th>Matched</th><th>Unknown</th><th>Created</th><th></th></tr></thead>
+              <tbody id="faceHistoryBody"><tr><td colspan="9" class="text-muted small">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3 d-none" id="faceReviewCard">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <span class="fw-semibold">Draft review</span>
+        <span id="faceJobTitle" class="text-muted small ms-2"></span>
+      </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <span id="faceJobStatus" class="badge bg-secondary">-</span>
+        <button class="btn btn-outline-danger btn-sm" id="faceDeleteJob" type="button">Delete Job</button>
+        <button class="btn btn-success btn-sm" id="faceSubmitAttendance" type="button" disabled>Submit Attendance Draft</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div id="faceJobError" class="alert alert-danger py-2 d-none"></div>
+      <div class="progress mb-3" style="height:14px"><div id="faceJobProgress" class="progress-bar" style="width:0%">0%</div></div>
+      <div class="d-flex flex-wrap gap-3 mb-3 small">
+        <div><span class="face-stat">Frames scanned</span><div id="faceStatFrames" class="fw-semibold">0</div></div>
+        <div><span class="face-stat">Faces detected</span><div id="faceStatFaces" class="fw-semibold">0</div></div>
+        <div><span class="face-stat">Matched students</span><div id="faceStatMatched" class="fw-semibold">0</div></div>
+        <div><span class="face-stat">Unknown faces</span><div id="faceStatUnknown" class="fw-semibold">0</div></div>
+        <div><span class="face-stat">Threshold</span><div id="faceStatThreshold" class="fw-semibold">-</div></div>
+      </div>
+
+      <div id="faceUnknownWrap" class="mb-3 d-none">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="fw-semibold">Unknown / low-confidence faces</div>
+          <div class="small text-muted">Assign these manually or leave them unmarked.</div>
+        </div>
+        <div id="faceUnknownList" class="d-flex flex-wrap gap-2"></div>
+      </div>
+
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <div class="fw-semibold">Class roster</div>
+        <div class="d-flex gap-2">
+          <input id="faceRosterSearch" class="form-control form-control-sm" style="width:220px" placeholder="Search name / reg no">
+          <button class="btn btn-outline-secondary btn-sm" id="faceAllAbsent" type="button">All Absent</button>
+        </div>
+      </div>
+      <div class="table-responsive" style="max-height:520px; overflow:auto">
+        <table class="table table-sm face-table align-middle">
+          <thead class="table-light"><tr><th>Student</th><th>Roll / Reg</th><th>Recognition</th><th>Status</th><th>Source</th></tr></thead>
+          <tbody id="faceRosterBody"><tr><td colspan="5" class="text-muted small">Start a webcam job or upload a video to load the roster draft.</td></tr></tbody>
+        </table>
+      </div>
+      <div class="small text-muted mt-2" id="faceSubmitHint">Recognition is a draft only. Verify each row and submit through the normal attendance validation.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.FACE_CFG = {{ face_cfg|tojson }};
+  window.FACE_CLASSES = {{ classes|tojson }};
+  window.FACE_TODAY = {{ today|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/admin_face_attendance.js') }}"></script>
+{% endblock %}

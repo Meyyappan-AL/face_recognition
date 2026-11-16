@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Edit Student{% endblock %}
+{% block content %}
+<div class="container" style="max-width:980px"><div class="card p-4 shadow-sm glass-card">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ 'danger' if category=='danger' else 'success' }} py-2 small">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+  <h5>Student ID {{ student.id }} - Universal Edit</h5>
+  <p class="small text-muted">Admin can edit all details. Reg No + DOB define student login (password is reset to DOB on save).</p>
+  <form method="post">
+    <div class="row g-2">
+      <div class="col-md-4"><label class="form-label small">Name</label><input class="form-control" name="name" value="{{ student.name or '' }}" required></div>
+      <div class="col-md-2"><label class="form-label small">Roll</label><input class="form-control" name="roll" value="{{ student.roll or '' }}"></div>
+      <div class="col-md-3"><label class="form-label small">Reg No (login)</label><input class="form-control" name="reg_no" value="{{ student.reg_no or '' }}" required></div>
+      <div class="col-md-3"><label class="form-label small">DOB (login)</label><input class="form-control" type="date" name="dob" value="{{ student.dob or '' }}" required></div>
+      <div class="col-md-3"><label class="form-label small">Class</label><select class="form-select" name="class"><option value="">Select</option>{% for c in classes %}<option value="{{c}}" {% if student.class==c %}selected{% endif %}>{{c}}</option>{% endfor %}{% if student.class and student.class not in classes %}<option value="{{ student.class }}" selected>{{ student.class }}</option>{% endif %}</select></div>
+      <div class="col-md-2"><label class="form-label small">Section</label><input class="form-control" name="sec" value="{{ student.section or '' }}"></div>
+      <div class="col-md-2"><label class="form-label small">Gender</label><input class="form-control" name="gender" value="{{ student.gender or '' }}"></div>
+      <div class="col-md-2"><label class="form-label small">Blood Group</label><input class="form-control" name="blood_group" value="{{ student.blood_group or '' }}"></div>
+      <div class="col-md-3"><label class="form-label small">Phone</label><input class="form-control" name="phone" value="{{ student.phone or '' }}"></div>
+      <div class="col-md-4"><label class="form-label small">Email</label><input class="form-control" name="email" value="{{ student.email or '' }}"></div>
+      <div class="col-md-4"><label class="form-label small">Guardian Name</label><input class="form-control" name="guardian_name" value="{{ student.guardian_name or '' }}"></div>
+      <div class="col-md-4"><label class="form-label small">Guardian Phone</label><input class="form-control" name="guardian_phone" value="{{ student.guardian_phone or '' }}"></div>
+      <div class="col-12"><label class="form-label small">Address</label><textarea class="form-control" name="address" rows="2">{{ student.address or '' }}</textarea></div>
+    </div>
+    <div class="mt-3 d-flex gap-2"><button class="btn btn-primary">Save Changes</button><a class="btn btn-outline-secondary" href="/admin/students">Cancel</a></div>
+  </form>
+</div></div>
+{% endblock %}

@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 import cv2
 import numpy as np
 import pickle
@@ -10,6 +11,10 @@ MODEL_PATH = "model.pkl"
 _haar_cascade = None
 _mp_face_detector = None
 _mp_detector_kind = None  # 'solutions' | 'tasks' | None
+_yunet_detector = None
+_yunet_path = None
+_yunet_size = None
+_detector_lock = threading.Lock()
 
 
 def _get_haar():
@@ -98,6 +103,99 @@ def _detect_face_bbox(bgr_image):
     except Exception:
         pass
     return None
+
+
+def _get_yunet():
+    global _yunet_detector, _yunet_path, _yunet_size
+    candidates = [
+        os.environ.get("FACE_DETECTOR_MODEL", ""),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_detection_yunet_2023mar.onnx"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "face_detection_yunet_2023mar.onnx"),
+    ]
+    model_path = next((p for p in candidates if p and os.path.exists(p)), None)
+    if not model_path or not hasattr(cv2, "FaceDetectorYN"):
+        return None
+    if _yunet_detector is None or _yunet_path != model_path:
+        try:
+            _yunet_detector = cv2.FaceDetectorYN.create(model_path, "", (320, 320), 0.6, 0.3, 5000)
+            _yunet_path = model_path
+            _yunet_size = (320, 320)
+        except Exception:
+            _yunet_detector = None
+            _yunet_path = None
+    return _yunet_detector
+
+
+def _iou(box_a, box_b):
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = iw * ih
+    if not inter:
+        return 0.0
+    area_a = max(1, (ax2 - ax1) * (ay2 - ay1))
+    area_b = max(1, (bx2 - bx1) * (by2 - by1))
+    return inter / float(area_a + area_b - inter)
+
+
+def detect_faces_bboxes(bgr_image, max_faces=8):
+    """Return up to max_faces face boxes (x1,y1,x2,y2), largest first.
+
+    Tries an optional YuNet ONNX model, then falls back to the bundled Haar
+    cascade so systems without model assets keep working.
+    """
+    global _yunet_size
+    if bgr_image is None:
+        return []
+    h, w = bgr_image.shape[:2]
+    if h < 10 or w < 10:
+        return []
+    try:
+        max_faces = max(1, int(max_faces))
+    except Exception:
+        max_faces = 8
+    boxes = []
+    with _detector_lock:
+        detector = _get_yunet()
+        if detector is not None:
+            try:
+                if _yunet_size != (w, h):
+                    detector.setInputSize((w, h))
+                    _yunet_size = (w, h)
+                _, faces = detector.detect(bgr_image)
+                if faces is not None:
+                    for face in faces:
+                        x, y, fw, fh = [int(v) for v in face[:4]]
+                        x1, y1 = max(0, x), max(0, y)
+                        x2, y2 = min(w, x + fw), min(h, y + fh)
+                        if x2 > x1 and y2 > y1:
+                            boxes.append((x1, y1, x2, y2))
+            except Exception:
+                boxes = []
+        if not boxes:
+            try:
+                gray = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2GRAY)
+                faces = _get_haar().detectMultiScale(
+                    gray, scaleFactor=1.1, minNeighbors=5, minSize=(48, 48)
+                )
+                for x, y, fw, fh in faces:
+                    x1, y1 = max(0, int(x)), max(0, int(y))
+                    x2, y2 = min(w, int(x + fw)), min(h, int(y + fh))
+                    if x2 > x1 and y2 > y1:
+                        boxes.append((x1, y1, x2, y2))
+            except Exception:
+                return []
+    boxes.sort(key=lambda b: (b[2] - b[0]) * (b[3] - b[1]), reverse=True)
+    kept = []
+    for box in boxes:
+        if any(_iou(box, prev) > 0.45 for prev in kept):
+            continue
+        kept.append(box)
+        if len(kept) >= max_faces:
+            break
+    return kept
 
 
 # ---- Utility: extract face crop -> small grayscale vector (embedding) ----

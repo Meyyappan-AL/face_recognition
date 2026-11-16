@@ -1,0 +1,50 @@
+{% set path = request.path %}
+{% set role = session.get('role') %}
+{% set is_admin = role == 'admin' %}
+{% set is_student = role == 'student' %}
+{% set is_hod = session.get('is_hod') %}
+<nav class="navbar navbar-expand-lg navbar-dark erp-topbar px-2 px-md-3 mb-3">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold" href="{{ '/student_dashboard' if is_student else ('/' if is_admin else '/staff_monitor') }}">Attendance ERP</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#erpNav" aria-controls="erpNav" aria-expanded="false" aria-label="Toggle navigation"><span class="navbar-toggler-icon"></span></button>
+    <div class="collapse navbar-collapse" id="erpNav">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0 small">
+        {% if is_student %}
+          <li class="nav-item"><a class="nav-link {% if path == '/student_dashboard' %}active{% endif %}" href="/student_dashboard">Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/student_dashboard' %}active{% endif %}" href="/student_dashboard#academicsSec">My Academics</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/od' %}active{% endif %}" href="/od">OD Request</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/medical' %}active{% endif %}" href="/medical">Medical Leave</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/student_dashboard' %}active{% endif %}" href="/student_dashboard" title="Alerts open from the dashboard">Alerts</a></li>
+        {% elif is_admin %}
+          <li class="nav-item"><a class="nav-link {% if path == '/' %}active{% endif %}" href="/">Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/students' %}active{% endif %}" href="/admin/students">Students</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/staff' %}active{% endif %}" href="/admin/staff">Staff</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/semesters' %}active{% endif %}" href="/admin/semesters">Semesters</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/calendar' %}active{% endif %}" href="/admin/calendar">Calendar</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/timetable' %}active{% endif %}" href="/admin/timetable">Timetable</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/electives' %}active{% endif %}" href="/admin/electives">Electives</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/notifications' %}active{% endif %}" href="/admin/notifications">Notifications</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/settings' %}active{% endif %}" href="/admin/settings">Settings</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/audit' %}active{% endif %}" href="/admin/audit">Audit</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/take_attendance' %}active{% endif %}" href="/take_attendance">Take Attendance</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/admin/face_attendance' %}active{% endif %}" href="/admin/face_attendance">Face Attendance</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/attendance_record' %}active{% endif %}" href="/attendance_record">Records</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/reports' %}active{% endif %}" href="/reports">Reports</a></li>
+        {% else %}
+          <li class="nav-item"><a class="nav-link {% if path == '/staff_monitor' %}active{% endif %}" href="/staff_monitor">Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/take_attendance' %}active{% endif %}" href="/take_attendance">Take Attendance</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/attendance_record' %}active{% endif %}" href="/attendance_record">Records</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/od' %}active{% endif %}" href="/od">{{ 'OD Review' if (is_hod or session.get('is_advisor')) else 'OD' }}</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/medical' %}active{% endif %}" href="/medical">{{ 'Medical Review' if (is_hod or session.get('is_advisor')) else 'Medical' }}</a></li>
+          <li class="nav-item"><a class="nav-link {% if path == '/reports' %}active{% endif %}" href="/reports">Reports</a></li>
+        {% endif %}
+      </ul>
+      <div class="d-flex gap-2 align-items-center flex-wrap">
+        <span class="small text-white-50 d-none d-md-inline">{{ session.get('display_name') or session.get('username') }}{% if is_hod %} (HOD){% endif %}</span>
+        {% if is_admin %}<a class="btn btn-outline-light btn-sm" href="/staff_monitor">Staff View</a>{% endif %}
+        <a class="btn btn-outline-light btn-sm {% if path == '/profile' %}active{% endif %}" href="/profile">Profile</a>
+        <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
+      </div>
+    </div>
+  </div>
+</nav>
