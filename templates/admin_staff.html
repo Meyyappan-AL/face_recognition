@@ -6,6 +6,7 @@
     .staff-avatar{width:34px;height:34px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#e8eefc;color:#37476A;font-weight:700;font-size:.8rem;flex:0 0 auto}
     .tt-chip{display:inline-flex;align-items:center;gap:.25rem;border:1px solid #e2e8f0;background:#f8fafc;border-radius:999px;padding:.15rem .5rem;font-size:.72rem;margin:0 .25rem .25rem 0}
     .table td,.table th{vertical-align:middle}
+    .staff-meta{font-size:.72rem;color:#6c757d}
   </style>
 {% endblock %}
 {% block content %}
@@ -14,14 +15,14 @@
       <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Staff accounts</div><div class="value" id="kTotal">-</div><div class="sub">excluding Admin</div></div></div>
       <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Active</div><div class="value text-success" id="kActive">-</div><div class="sub">can log in</div></div></div>
       <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Advisors</div><div class="value text-primary" id="kAdvisors">-</div><div class="sub">class advisors</div></div></div>
-      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">HOD</div><div class="value text-warning" id="kHod">-</div><div class="sub">override access</div></div></div>
+      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Archived</div><div class="value text-secondary" id="kArchived">-</div><div class="sub">soft-deleted</div></div></div>
     </div>
 
     <div class="card erp-card p-3 mb-3">
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
         <div>
           <h5 class="erp-section-title mb-1">Staff / HOD / Advisor Accounts</h5>
-          <div class="erp-muted">Staff passwords default to the display name in ALL CAPS. Existing passwords are preserved during timetable sync unless you reset them.</div>
+          <div class="erp-muted">Manage staff master data. Timetable sync creates staff only and never changes passwords, contact details, profile fields, deactivation, or archived status.</div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
           <button id="addBtn" class="btn btn-primary btn-sm" type="button">Add Staff</button>
@@ -35,14 +36,16 @@
       <div id="msg" class="alert alert-light border py-2 small d-none"></div>
 
       <div class="row g-2 mb-2">
-        <div class="col-md-5"><input id="search" class="form-control form-control-sm" placeholder="Search name, code, class, phone or email"></div>
+        <div class="col-md-5"><input id="search" class="form-control form-control-sm" placeholder="Search name, code, class, designation, phone or email"></div>
         <div class="col-md-3">
           <select id="filterRole" class="form-select form-select-sm">
-            <option value="">All roles</option>
+            <option value="">All statuses/roles</option>
             <option value="hod">HOD</option>
             <option value="advisor">Advisors</option>
             <option value="staff">Regular staff</option>
+            <option value="active">Active only</option>
             <option value="inactive">Inactive</option>
+            <option value="deleted">Archived</option>
           </select>
         </div>
         <div class="col-md-2"><button id="refreshBtn" class="btn btn-outline-dark btn-sm w-100" type="button">Refresh</button></div>
@@ -51,7 +54,7 @@
       <div class="erp-table-wrap">
         <table class="table table-hover erp-table mb-0">
           <thead>
-            <tr><th>Staff</th><th>Code</th><th>Role</th><th>Advisor class</th><th>Contact</th><th>Status</th><th class="text-end">Actions</th></tr>
+            <tr><th>Staff</th><th>Code</th><th>Role / Profile</th><th>Advisor class</th><th>Contact</th><th>Status</th><th class="text-end">Actions</th></tr>
           </thead>
           <tbody id="staffBody"><tr><td colspan="7" class="text-center text-muted py-4">Loading...</td></tr></tbody>
         </table>
@@ -64,7 +67,7 @@
           <div class="d-flex justify-content-between align-items-center mb-2">
             <div>
               <h6 class="erp-section-title mb-1">Timetable Staff</h6>
-              <div class="erp-muted">Staff discovered from timetable `staff_directory` entries.</div>
+              <div class="erp-muted">Staff discovered from timetable <code>staff_directory</code> and class advisor entries. Timetables handle staff identity and class mapping only.</div>
             </div>
             <span id="ttCount" class="badge bg-secondary">-</span>
           </div>
@@ -80,11 +83,11 @@
         <div class="card erp-card p-3">
           <h6 class="erp-section-title mb-2">CSV format</h6>
           <div class="erp-muted mb-2">Header row:</div>
-          <pre class="small bg-light border rounded p-2 mb-2" style="white-space:pre-wrap">staff_code,display_name,phone,email,is_hod,advisor_class,active,password</pre>
+          <pre class="small bg-light border rounded p-2 mb-2" style="white-space:pre-wrap">staff_code,display_name,phone,email,dob,gender,designation,department,qualification,address,date_of_joining,is_hod,advisor_class,active,password</pre>
           <ul class="small text-muted mb-0 ps-3">
             <li><code>staff_code</code> and <code>display_name</code> are required.</li>
             <li><code>is_hod</code> and <code>active</code> accept 1/0, true/false, yes/no.</li>
-            <li><code>password</code> is optional; blank keeps/defaults the name rule.</li>
+            <li>Archived staff are reactivated when imported with <code>active=1</code>.</li>
             <li>Rows with a student login code are rejected.</li>
           </ul>
         </div>
@@ -94,7 +97,7 @@
 </div>
 
 <div class="modal fade" id="staffModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="staffModalTitle">Add Staff</h5>
@@ -104,46 +107,22 @@
         <div class="modal-body">
           <input type="hidden" id="editId">
           <div class="row g-3">
-            <div class="col-md-4">
-              <label class="form-label small">Staff code *</label>
-              <input id="staffCode" class="form-control form-control-sm text-uppercase" maxlength="20" required>
-              <div class="form-text">1-20 letters/digits/._-</div>
-            </div>
-            <div class="col-md-8">
-              <label class="form-label small">Display name *</label>
-              <input id="displayName" class="form-control form-control-sm" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small">Phone</label>
-              <input id="phone" class="form-control form-control-sm" inputmode="tel">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small">Email</label>
-              <input id="email" type="email" class="form-control form-control-sm">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small">Advisor class</label>
-              <select id="advisorClass" class="form-select form-select-sm">
-                <option value="">Not a class advisor</option>
-                {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-              </select>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small">Password</label>
-              <input id="password" class="form-control form-control-sm" autocomplete="new-password">
-              <div class="form-text">Leave blank to use display name in ALL CAPS.</div>
-            </div>
-            <div class="col-md-6">
-              <div class="form-check form-switch mt-4">
-                <input id="isHod" class="form-check-input" type="checkbox">
-                <label class="form-check-label small" for="isHod">HOD override access</label>
-              </div>
-            </div>
-            <div class="col-md-6">
-              <div class="form-check form-switch mt-4">
-                <input id="active" class="form-check-input" type="checkbox" checked>
-                <label class="form-check-label small" for="active">Active account</label>
-              </div>
+            <div class="col-md-4"><label class="form-label small">Staff code *</label><input id="staffCode" class="form-control form-control-sm text-uppercase" maxlength="20" required><div class="form-text">1-20 letters/digits/._-</div></div>
+            <div class="col-md-8"><label class="form-label small">Display name *</label><input id="displayName" class="form-control form-control-sm" required></div>
+            <div class="col-md-3"><label class="form-label small">Date of birth</label><input id="dob" type="date" class="form-control form-control-sm"></div>
+            <div class="col-md-3"><label class="form-label small">Gender</label><select id="gender" class="form-select form-select-sm"><option value="">Not set</option><option>Male</option><option>Female</option><option>Other</option></select></div>
+            <div class="col-md-3"><label class="form-label small">Date of joining</label><input id="dateOfJoining" type="date" class="form-control form-control-sm"></div>
+            <div class="col-md-3"><label class="form-label small">Designation</label><input id="designation" class="form-control form-control-sm" placeholder="e.g. Assistant Professor"></div>
+            <div class="col-md-4"><label class="form-label small">Department</label><input id="department" class="form-control form-control-sm" placeholder="e.g. Information Technology"></div>
+            <div class="col-md-4"><label class="form-label small">Qualification</label><input id="qualification" class="form-control form-control-sm" placeholder="e.g. M.Tech"></div>
+            <div class="col-md-4"><label class="form-label small">Advisor class</label><select id="advisorClass" class="form-select form-select-sm"><option value="">Not a class advisor</option>{% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></div>
+            <div class="col-md-6"><label class="form-label small">Phone</label><input id="phone" class="form-control form-control-sm" inputmode="tel"></div>
+            <div class="col-md-6"><label class="form-label small">Email</label><input id="email" type="email" class="form-control form-control-sm"></div>
+            <div class="col-12"><label class="form-label small">Address</label><textarea id="address" class="form-control form-control-sm" rows="2"></textarea></div>
+            <div class="col-md-6"><label class="form-label small">Password</label><input id="password" class="form-control form-control-sm" autocomplete="new-password"><div class="form-text">Leave blank to preserve existing password or use the display name in ALL CAPS for a new account.</div></div>
+            <div class="col-md-6 d-flex align-items-end gap-4 flex-wrap">
+              <div class="form-check form-switch"><input id="isHod" class="form-check-input" type="checkbox"><label class="form-check-label small" for="isHod">HOD override access</label></div>
+              <div class="form-check form-switch"><input id="active" class="form-check-input" type="checkbox" checked><label class="form-check-label small" for="active">Active account</label></div>
             </div>
           </div>
           <div id="formMsg" class="alert alert-danger py-2 small mt-3 mb-0 d-none"></div>
@@ -163,22 +142,20 @@
       <div class="modal-header"><h5 class="modal-title">Password Reset</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <p class="small mb-2" id="resetWho"></p>
-        <div class="input-group input-group-sm">
-          <span class="input-group-text">New password</span>
-          <input id="resetPassword" class="form-control" readonly>
-        </div>
+        <div class="input-group input-group-sm"><span class="input-group-text">New password</span><input id="resetPassword" class="form-control" readonly></div>
         <div class="form-text">Share this with the staff member. They can change it from Profile.</div>
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Done</button></div>
     </div>
   </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
 (function(){
   const $=id=>document.getElementById(id);
   const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-  let staff=[], ttStaff={}, advisors={}, editingId=null;
+  let staff=[], ttStaff={}, advisors={};
   const modalEl=$('staffModal');
   const modal=()=>window.bootstrap?new bootstrap.Modal(modalEl):null;
   const resetModal=()=>window.bootstrap?new bootstrap.Modal($('resetModal')):null;
@@ -189,10 +166,10 @@
     e.innerHTML=t;
   }
   function formMsg(t){ const e=$('formMsg'); if(!t){ e.classList.add('d-none'); e.textContent=''; return; } e.classList.remove('d-none'); e.textContent=t; }
-
-  function initials(name){
-    const parts=(name||'').trim().split(/\s+/).filter(Boolean);
-    return ((parts[0]||'?')[0]+(parts.length>1?(parts[parts.length-1][0]||''):'')).toUpperCase();
+  function initials(name){ const parts=(name||'').trim().split(/\s+/).filter(Boolean); return ((parts[0]||'?')[0]+(parts.length>1?(parts[parts.length-1][0]||''):'')).toUpperCase(); }
+  function statusBadge(s){
+    if(s.deleted_at) return '<span class="badge bg-dark">Archived</span>';
+    return Number(s.active)?'<span class="badge bg-success">Active</span>':'<span class="badge bg-secondary">Inactive</span>';
   }
   function roleBadges(s){
     let out=[];
@@ -201,43 +178,46 @@
     if(!out.length) out.push('<span class="badge bg-secondary">Staff</span>');
     return out.join(' ');
   }
-
   function renderKpis(){
     $('kTotal').textContent=staff.length;
-    $('kActive').textContent=staff.filter(s=>Number(s.active)).length;
-    $('kAdvisors').textContent=staff.filter(s=>Number(s.is_advisor)).length;
-    $('kHod').textContent=staff.filter(s=>Number(s.is_hod)).length;
+    $('kActive').textContent=staff.filter(s=>Number(s.active)&&!s.deleted_at).length;
+    $('kAdvisors').textContent=staff.filter(s=>Number(s.is_advisor)&&!s.deleted_at).length;
+    $('kArchived').textContent=staff.filter(s=>!!s.deleted_at).length;
   }
-
   function renderTable(){
     const q=($('search').value||'').trim().toLowerCase();
     const f=$('filterRole').value;
-    let rows=staff.filter(s=>{
-      const hay=[s.display_name,s.username,s.staff_code,s.advisor_class,s.phone,s.email].join(' ').toLowerCase();
+    const rows=staff.filter(s=>{
+      const hay=[s.display_name,s.username,s.staff_code,s.advisor_class,s.designation,s.department,s.qualification,s.phone,s.email].join(' ').toLowerCase();
       if(q && !hay.includes(q)) return false;
       if(f==='hod' && !Number(s.is_hod)) return false;
       if(f==='advisor' && !Number(s.is_advisor)) return false;
       if(f==='staff' && (Number(s.is_hod)||Number(s.is_advisor))) return false;
-      if(f==='inactive' && Number(s.active)) return false;
+      if(f==='active' && (!Number(s.active)||s.deleted_at)) return false;
+      if(f==='inactive' && (Number(s.active)||s.deleted_at)) return false;
+      if(f==='deleted' && !s.deleted_at) return false;
       return true;
     });
     if(!rows.length){ $('staffBody').innerHTML='<tr><td colspan="7" class="text-center text-muted py-4">No staff match this view.</td></tr>'; return; }
     $('staffBody').innerHTML=rows.map(s=>`
       <tr>
-        <td><div class="d-flex align-items-center gap-2"><span class="staff-avatar">${esc(initials(s.display_name))}</span><div><div class="fw-semibold">${esc(s.display_name||'-')}</div><div class="small text-muted">${esc(s.username||'')}</div></div></div></td>
+        <td><div class="d-flex align-items-center gap-2"><span class="staff-avatar">${esc(initials(s.display_name))}</span><div><div class="fw-semibold">${esc(s.display_name||'-')}</div><div class="staff-meta">${esc(s.designation||s.department||s.username||'')}</div></div></div></td>
         <td><span class="staff-code">${esc(s.staff_code||s.username||'')}</span></td>
-        <td>${roleBadges(s)}</td>
+        <td>${roleBadges(s)}${s.qualification?`<div class="staff-meta">${esc(s.qualification)}</div>`:''}${s.date_of_joining?`<div class="staff-meta">Joined ${esc(s.date_of_joining)}</div>`:''}</td>
         <td>${s.advisor_class?`<span class="badge bg-light text-dark border">${esc(s.advisor_class)}</span>`:'<span class="text-muted small">-</span>'}</td>
         <td class="small">${s.phone?`<div>${esc(s.phone)}</div>`:''}${s.email?`<div class="text-muted">${esc(s.email)}</div>`:''}${!s.phone&&!s.email?'<span class="text-muted">-</span>':''}</td>
-        <td>${Number(s.active)?'<span class="badge bg-success">Active</span>':'<span class="badge bg-secondary">Inactive</span>'}</td>
+        <td>${statusBadge(s)}</td>
         <td class="text-end text-nowrap">
           <button class="btn btn-outline-primary btn-sm" data-edit="${Number(s.id)}">Edit</button>
           <button class="btn btn-outline-warning btn-sm" data-reset="${Number(s.id)}" data-name="${esc(s.display_name||s.username||'')}">Reset</button>
-          <button class="btn btn-outline-${Number(s.active)?'danger':'success'} btn-sm" data-toggle="${Number(s.id)}">${Number(s.active)?'Disable':'Enable'}</button>
+          ${s.deleted_at
+            ? `<button class="btn btn-outline-success btn-sm" data-reactivate="${Number(s.id)}">Restore</button>`
+            : (Number(s.active)
+              ? `<button class="btn btn-outline-danger btn-sm" data-deactivate="${Number(s.id)}">Deactivate</button><button class="btn btn-outline-dark btn-sm" data-delete="${Number(s.id)}" data-name="${esc(s.display_name||s.username||'')}">Archive</button>`
+              : `<button class="btn btn-outline-success btn-sm" data-reactivate="${Number(s.id)}">Reactivate</button><button class="btn btn-outline-dark btn-sm" data-delete="${Number(s.id)}" data-name="${esc(s.display_name||s.username||'')}">Archive</button>`)}
         </td>
       </tr>`).join('');
   }
-
   function renderTimetableStaff(){
     const codes=Object.keys(ttStaff||{}).sort();
     $('ttCount').textContent=codes.length;
@@ -246,7 +226,7 @@
     $('ttBody').innerHTML=codes.map(code=>{
       const info=ttStaff[code]||{}; const name=info.name||code; const adv=(advisors[code]||{}).class||'';
       const acct=accountByCode[code.toUpperCase()];
-      const status=acct?`<span class="badge bg-success">Linked #${acct.id}</span>`:'<span class="badge bg-warning text-dark">No account</span>';
+      const status=acct?statusBadge(acct):'<span class="badge bg-warning text-dark">No account</span>';
       return `<tr>
         <td><span class="staff-code">${esc(code)}</span></td>
         <td>${esc(name)}</td>
@@ -256,7 +236,6 @@
       </tr>`;
     }).join('');
   }
-
   async function load(){
     try{
       const d=await erp.fetchJSON('/api/admin/staff');
@@ -264,13 +243,18 @@
       renderKpis(); renderTable(); renderTimetableStaff();
     }catch(e){ msg('Could not load staff: '+esc(e.message||e),'danger'); }
   }
-
   function openForm(s){
-    editingId=s?Number(s.id):null;
     $('staffModalTitle').textContent=s?'Edit Staff':'Add Staff';
     $('staffCode').value=s?(s.staff_code||s.username||''):'';
     $('staffCode').readOnly=!!s;
     $('displayName').value=s?(s.display_name||''):'';
+    $('dob').value=s?(s.dob||''):'';
+    $('gender').value=s?(s.gender||''):'';
+    $('dateOfJoining').value=s?(s.date_of_joining||''):'';
+    $('designation').value=s?(s.designation||''):'';
+    $('department').value=s?(s.department||''):'';
+    $('qualification').value=s?(s.qualification||''):'';
+    $('address').value=s?(s.address||''):'';
     $('phone').value=s?(s.phone||''):'';
     $('email').value=s?(s.email||''):'';
     $('advisorClass').value=s?(s.advisor_class||''):'';
@@ -280,24 +264,19 @@
     formMsg('');
     modal()?.show();
   }
-
   function openPrefill(code){
     const info=ttStaff[code]||{}; const adv=(advisors[code]||{}).class||'';
     openForm({staff_code:code,display_name:info.name||code,advisor_class:adv,is_hod:0,active:1,phone:'',email:''});
     $('staffCode').readOnly=true;
   }
-
   async function saveForm(e){
     e.preventDefault(); formMsg('');
     const payload={
-      staff_code:$('staffCode').value.trim().toUpperCase(),
-      display_name:$('displayName').value.trim(),
-      phone:$('phone').value.trim(),
-      email:$('email').value.trim(),
-      advisor_class:$('advisorClass').value,
-      is_hod:$('isHod').checked?1:0,
-      active:$('active').checked?1:0,
-      password:$('password').value
+      staff_code:$('staffCode').value.trim().toUpperCase(), display_name:$('displayName').value.trim(),
+      dob:$('dob').value, gender:$('gender').value, date_of_joining:$('dateOfJoining').value,
+      designation:$('designation').value.trim(), department:$('department').value.trim(), qualification:$('qualification').value.trim(),
+      address:$('address').value.trim(), phone:$('phone').value.trim(), email:$('email').value.trim(),
+      advisor_class:$('advisorClass').value, is_hod:$('isHod').checked?1:0, active:$('active').checked?1:0, password:$('password').value
     };
     if(!payload.staff_code||!payload.display_name){ formMsg('Staff code and display name are required.'); return; }
     $('saveBtn').disabled=true;
@@ -307,11 +286,9 @@
       msg('Saved staff <strong>'+esc(payload.display_name)+'</strong>.','success');
       erp.toast('Staff saved','success');
       await load();
-      const s=staff.find(x=>Number(x.id)===Number(d.id)); if(s&&!s.active) msg('Saved, but this account is inactive.','warning');
     }catch(err){ formMsg(err.message||'Save failed.'); }
     finally{ $('saveBtn').disabled=false; }
   }
-
   async function resetPassword(id,name){
     if(!confirm('Reset password for '+name+'? This immediately replaces the current password.')) return;
     try{
@@ -322,17 +299,15 @@
       await load();
     }catch(e){ msg('Reset failed: '+esc(e.message||e),'danger'); }
   }
-
-  async function toggle(id){
+  async function setStatus(id, action, message){
     try{
-      const d=await erp.fetchJSON('/api/admin/staff/'+id+'/toggle',{method:'POST',body:{}});
-      msg(d.active?'Account enabled.':'Account disabled.','success');
+      const d=await erp.fetchJSON('/api/admin/staff/'+id+'/'+action,{method:'POST',body:{}});
+      msg(d.deleted?'Account archived.':(d.active?'Account reactivated.':'Account deactivated.'),'success');
       await load();
-    }catch(e){ msg('Could not change account status: '+esc(e.message||e),'danger'); }
+    }catch(e){ msg(message+' '+esc(e.message||e),'danger'); }
   }
-
   async function sync(){
-    if(!confirm('Sync staff accounts from timetable files? Existing passwords will be preserved.')) return;
+    if(!confirm('Sync staff accounts from timetable files? Existing passwords and staff profile data will be preserved.')) return;
     $('syncBtn').disabled=true; msg('Syncing from timetables...');
     try{
       const d=await erp.fetchJSON('/api/admin/staff/sync',{method:'POST',body:{}});
@@ -341,7 +316,6 @@
     }catch(e){ msg('Sync failed: '+esc(e.message||e),'danger'); }
     finally{ $('syncBtn').disabled=false; }
   }
-
   async function importCsv(file){
     if(!file) return;
     const fd=new FormData(); fd.append('file',file);
@@ -350,28 +324,26 @@
       const d=await erp.fetchJSON('/api/admin/staff/import',{method:'POST',body:fd});
       const errs=(d.errors||[]);
       msg(`Imported ${esc(file.name)}: ${d.added||0} added, ${d.updated||0} updated${errs.length?', '+errs.length+' row errors':''}.`,errs.length?'warning':'success');
-      if(errs.length){
-        const box=document.getElementById('msg');
-        box.innerHTML+='<div class="mt-2"><strong>Errors</strong><ul class="mb-0 ps-3">'+errs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>';
-      }
+      if(errs.length){ $('msg').innerHTML+='<div class="mt-2"><strong>Errors</strong><ul class="mb-0 ps-3">'+errs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>'; }
       await load();
     }catch(e){ msg('Import failed: '+esc(e.message||e),'danger'); }
     finally{ $('csvFile').value=''; }
   }
-
   function exportCsv(){
-    const rows=[['staff_code','display_name','phone','email','is_hod','advisor_class','active']];
-    staff.forEach(s=>rows.push([s.staff_code||s.username||'',s.display_name||'',s.phone||'',s.email||'',Number(s.is_hod)||0,s.advisor_class||'',Number(s.active)||0]));
-    const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+    const headers=['staff_code','display_name','phone','email','dob','gender','designation','department','qualification','address','date_of_joining','is_hod','advisor_class','active'];
+    const rows=[headers];
+    staff.forEach(s=>rows.push([s.staff_code||s.username||'',s.display_name||'',s.phone||'',s.email||'',s.dob||'',s.gender||'',s.designation||'',s.department||'',s.qualification||'',s.address||'',s.date_of_joining||'',Number(s.is_hod)||0,s.advisor_class||'',Number(s.active)||0]));
+    const csv=rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
     const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a');
     a.href=URL.createObjectURL(blob); a.download='staff.csv'; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   }
-
   $('staffBody').addEventListener('click',e=>{
     const ed=e.target.closest('[data-edit]'); if(ed){ openForm(staff.find(s=>Number(s.id)===Number(ed.dataset.edit))); return; }
     const rs=e.target.closest('[data-reset]'); if(rs){ resetPassword(Number(rs.dataset.reset),rs.dataset.name||'this staff member'); return; }
-    const tg=e.target.closest('[data-toggle]'); if(tg){ toggle(Number(tg.dataset.toggle)); }
+    const da=e.target.closest('[data-deactivate]'); if(da){ setStatus(Number(da.dataset.deactivate),'deactivate','Could not deactivate account:'); return; }
+    const ra=e.target.closest('[data-reactivate]'); if(ra){ setStatus(Number(ra.dataset.reactivate),'reactivate','Could not reactivate account:'); return; }
+    const dl=e.target.closest('[data-delete]'); if(dl){ if(confirm('Archive '+dl.dataset.name+'? They will immediately lose access. This keeps history intact.')) setStatus(Number(dl.dataset.delete),'delete','Could not archive account:'); }
   });
   $('ttBody').addEventListener('click',e=>{
     const ed=e.target.closest('[data-edit]'); if(ed){ openForm(staff.find(s=>Number(s.id)===Number(ed.dataset.edit))); return; }
@@ -386,7 +358,6 @@
   $('filterRole').addEventListener('change',renderTable);
   $('staffForm').addEventListener('submit',saveForm);
   modalEl.addEventListener('show.bs.modal',()=>$('staffCode').classList.toggle('text-uppercase',!$('staffCode').readOnly));
-
   load();
 })();
 </script>

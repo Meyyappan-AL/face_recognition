@@ -32,7 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (isNew) li.classList.add('new-notification-entry');
 
                 li.innerHTML = `
-                    <span><strong class="${textColor}">${n.name}</strong> ${actionText}.</span>
+                    <span><strong class="${textColor}">${erp.repBadge(n.student_role)}${n.name}</strong> ${actionText}.</span>
                     <span class="badge bg-secondary rounded-pill">${(n.timestamp||'').split(' ')[1] || ''}</span>`;
                 
                 notificationList.appendChild(li);

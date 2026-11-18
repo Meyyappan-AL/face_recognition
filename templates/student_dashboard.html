@@ -48,7 +48,7 @@
         </ul>
         <div class="d-flex gap-2 flex-wrap align-items-center">
           <button class="btn btn-outline-light btn-sm position-relative" id="openNotifBtn" type="button">Alerts <span id="notifBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span></button>
-          <span class="small text-white-50 d-none d-md-inline">{{ student_info.name if student_info else session.get('username') }}</span>
+          <span class="small text-white-50 d-none d-md-inline">{% if student_info %}{{ rep_badge(student_info.student_role) }}{{ student_info.name }}{% else %}{{ session.get('username') }}{% endif %}</span>
           <a class="btn btn-outline-light btn-sm" href="/profile">Profile</a>
           <a class="btn btn-danger btn-sm" href="/logout">Logout</a>
         </div>
@@ -69,7 +69,7 @@
           <div>
             <h5 class="section-title">Attendance Overview</h5>
             <div class="muted-help" id="overviewRange">Loading...</div>
-            <div class="muted-help">{% if student_info %}{{ student_info.name }} | {{ student_info.reg_no or '-' }} | {{ student_info.class or '-' }} {{ student_info.section or '' }}{% else %}No linked student profile.{% endif %}</div>
+            <div class="muted-help">{% if student_info %}{{ rep_badge(student_info.student_role) }}{{ student_info.name }} | {{ student_info.reg_no or '-' }} | {{ student_info.class or '-' }} {{ student_info.section or '' }}{% else %}No linked student profile.{% endif %}</div>
           </div>
           <div class="d-flex gap-2 align-items-center flex-wrap">
             <select id="semSelect" class="form-select form-select-sm" style="width:auto" title="Select semester"></select>

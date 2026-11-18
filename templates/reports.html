@@ -162,7 +162,7 @@
   function renderStudents(){
     const q=($('studentSearch').value||'').trim().toLowerCase();
     const rows=students.filter(s=>!q || [s.name,s.reg_no,s.class].join(' ').toLowerCase().includes(q));
-    $('studentBody').innerHTML=rows.length?rows.map(s=>`<tr class="${s.defaulter?'table-danger':''}"><td><div class="fw-semibold">${esc(s.name||'-')}</div><div class="small text-muted">${esc(s.reg_no||'')}</div></td><td>${esc(s.class||'')}</td><td>${Number(s.present||0)}</td><td>${Number(s.absent||0)}</td><td>${Number(s.late||0)}</td><td>${Number(s.od||0)}</td><td>${Number(s.medical||0)}</td><td>${Number(s.full_day_absences||0)}</td><td>${Number(s.partial_day_absences||0)}</td><td>${Number(s.absent_hours||0)}</td><td class="fw-bold ${s.defaulter?'text-danger':'text-success'}">${Number(s.percentage||0)}%</td></tr>`).join(''):'<tr><td colspan="11" class="erp-empty">No students match this filter.</td></tr>';
+    $('studentBody').innerHTML=rows.length?rows.map(s=>`<tr class="${s.defaulter?'table-danger':''}"><td><div class="fw-semibold">${erp.repBadge(s.student_role)}${esc(s.name||'-')}</div><div class="small text-muted">${esc(s.reg_no||'')}</div></td><td>${esc(s.class||'')}</td><td>${Number(s.present||0)}</td><td>${Number(s.absent||0)}</td><td>${Number(s.late||0)}</td><td>${Number(s.od||0)}</td><td>${Number(s.medical||0)}</td><td>${Number(s.full_day_absences||0)}</td><td>${Number(s.partial_day_absences||0)}</td><td>${Number(s.absent_hours||0)}</td><td class="fw-bold ${s.defaulter?'text-danger':'text-success'}">${Number(s.percentage||0)}%</td></tr>`).join(''):'<tr><td colspan="11" class="erp-empty">No students match this filter.</td></tr>';
   }
 
   async function load(){

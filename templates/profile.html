@@ -8,7 +8,7 @@
           <h5 class="erp-section-title mb-3">Account Details</h5>
           {% if student %}
             <dl class="row small mb-0 g-2">
-              <dt class="col-5 text-muted fw-normal">Name</dt><dd class="col-7 mb-0 fw-semibold">{{ student.name or '-' }}</dd>
+              <dt class="col-5 text-muted fw-normal">Name</dt><dd class="col-7 mb-0 fw-semibold">{{ rep_badge(student.student_role) }}{{ student.name or '-' }}</dd>
               <dt class="col-5 text-muted fw-normal">Reg No (Login)</dt><dd class="col-7 mb-0">{{ student.reg_no or '-' }}</dd>
               <dt class="col-5 text-muted fw-normal">Date of Birth</dt><dd class="col-7 mb-0">{{ student.dob or '-' }}</dd>
               <dt class="col-5 text-muted fw-normal">Roll</dt><dd class="col-7 mb-0">{{ student.roll or '-' }}</dd>
@@ -23,10 +23,17 @@
               <dt class="col-5 text-muted fw-normal">Name</dt><dd class="col-7 mb-0 fw-semibold">{{ staff.display_name or staff.username }}</dd>
               <dt class="col-5 text-muted fw-normal">Staff Code</dt><dd class="col-7 mb-0">{{ staff.staff_code or staff.username }}</dd>
               <dt class="col-5 text-muted fw-normal">Role</dt><dd class="col-7 mb-0">{{ staff.role|title }}{% if staff.is_hod %} / HOD{% endif %}{% if staff.is_advisor %} / Advisor {{ staff.advisor_class or '' }}{% endif %}</dd>
+              <dt class="col-5 text-muted fw-normal">Designation</dt><dd class="col-7 mb-0">{{ staff.designation or '-' }}</dd>
+              <dt class="col-5 text-muted fw-normal">Department</dt><dd class="col-7 mb-0">{{ staff.department or '-' }}</dd>
+              <dt class="col-5 text-muted fw-normal">Qualification</dt><dd class="col-7 mb-0">{{ staff.qualification or '-' }}</dd>
+              <dt class="col-5 text-muted fw-normal">Date of Birth</dt><dd class="col-7 mb-0">{{ staff.dob or '-' }}</dd>
+              <dt class="col-5 text-muted fw-normal">Date of Joining</dt><dd class="col-7 mb-0">{{ staff.date_of_joining or '-' }}</dd>
+              <dt class="col-5 text-muted fw-normal">Gender</dt><dd class="col-7 mb-0">{{ staff.gender or '-' }}</dd>
+              <dt class="col-5 text-muted fw-normal">Address</dt><dd class="col-7 mb-0">{{ staff.address or '-' }}</dd>
               <dt class="col-5 text-muted fw-normal">Email</dt><dd class="col-7 mb-0">{{ staff.email or '-' }}</dd>
               <dt class="col-5 text-muted fw-normal">Phone</dt><dd class="col-7 mb-0">{{ staff.phone or '-' }}</dd>
             </dl>
-            <div class="alert alert-light border small mt-3 mb-0">Role, staff code, HOD/advisor flags and class allocation are admin-managed. You can edit your phone, email and password.</div>
+            <div class="alert alert-light border small mt-3 mb-0">Role, staff code, profile fields, HOD/advisor flags and class allocation are admin/timetable-managed. You can edit your phone, email and password.</div>
           {% else %}
             <div class="small text-muted">No profile details found.</div>
           {% endif %}

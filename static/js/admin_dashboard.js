@@ -4,10 +4,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const trainBtn = document.getElementById("trainBtn");
     const trainProgress = document.getElementById("trainProgress");
     const trainMsg = document.getElementById("trainMsg");
-    const attendanceChartCanvas = document.getElementById("attendanceChart");
 
     let trainPollingInterval = null;
-    let attendanceChart = null;
 
     async function pollTrainStatus() {
         if (!trainProgress || !trainMsg) return false;
@@ -28,7 +26,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (trainPollingInterval) clearInterval(trainPollingInterval);
                 trainPollingInterval = null;
                 if (trainBtn) trainBtn.disabled = false;
-                if (progress >= 100) updateChart();
             }
             return !!data.running;
         } catch (e) {
@@ -70,32 +67,5 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    async function updateChart() {
-        if (!attendanceChartCanvas || typeof Chart === "undefined") return;
-        try {
-            const res = await fetch("/attendance_stats");
-            if (!res.ok) return;
-            const data = await res.json();
-            const ctx = attendanceChartCanvas.getContext("2d");
-            if (!attendanceChart) {
-                attendanceChart = new Chart(ctx, {
-                    type: "bar",
-                    data: {
-                        labels: data.dates || [],
-                        datasets: [{ label: "Attendance Count", data: data.counts || [], backgroundColor: "rgba(59, 130, 246, 0.7)", borderRadius: 4 }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
-                });
-            } else {
-                attendanceChart.data.labels = data.dates || [];
-                attendanceChart.data.datasets[0].data = data.counts || [];
-                attendanceChart.update();
-            }
-        } catch (e) {
-            console.error("Error updating chart:", e);
-        }
-    }
-
     if (trainBtn && trainProgress && trainMsg) pollTrainStatus();
-    if (attendanceChartCanvas) updateChart();
 });

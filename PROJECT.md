@@ -1,6 +1,6 @@
 # PROJECT.md
 
-Last updated: 2026-11-16
+Last updated: 2026-11-18
 
 This file is the source of truth for continuing the ERP project in a new chat. Read this first, then run the verification commands near the bottom before making changes.
 
@@ -26,7 +26,7 @@ This file is the source of truth for continuing the ERP project in a new chat. R
   - `.env`
 - Do not commit or print real SMTP/Fast2SMS/VAPID secrets.
 - Current scope is **local-only**: manual period attendance plus admin-only webcam/uploaded-video attendance. Cloud hosting, Supabase/Postgres, Cloudflare R2, and CCTV/RTSP are deferred until staff approval. Manual attendance remains the primary path.
-- Automatic default-Absent materialization is **in scope**: each scheduled period becomes Absent after its slot ends unless explicitly marked, overridden by approved OD, or changed by staff before the same-day cutoff.
+- Current server behavior still persists automatic `Absent` rows after scheduled slots end. Approved Wave 2 replaces this with stored `-` rows from class date `06:00` until explicit marking; do not implement the new policy in Wave 1.
 - Student identity and duplicate prevention are keyed on `reg_no`, **not** roll number.
 - Admin/HOD can override attendance restrictions after cutoff until the semester end date; future attendance is never editable and all manual changes close after semester end. Advisors have full-day access only for their own class.
 - No real notification credentials are configured in `.env`; notification sending must remain optional and gracefully disabled.
@@ -59,6 +59,8 @@ The ERP is functional for the main admin, staff, HOD/advisor, and student flows.
 - Reports and records now support role-scoped insights, class/staff/period/student comparisons, absence filters, status donut charts, and absent-period/hour metrics.
 - Admin face attendance runs locally: one-student-at-a-time webcam capture, 550 MB classroom video upload with background processing, student/unknown deduplication, low-confidence flags, manual unknown-face assignment, and review-before-submit. Uploaded videos are deleted after review.
 - Phase 7 scale verification passed with a synthetic 75-student roster: 60 recognized students were collapsed into 60 rows, unknown groups were deduplicated/capped, and a 75-row face-attendance submit completed successfully.
+- Redesign Phase 1 added student batch/study-year fields, filterable/sortable admin student list, a read-only per-student attendance page, and removed the remaining legacy attendance UI sections.
+- Wave 1 added optional student roles with `Rep` badges, expanded staff management with extended profiles/archive status, and redesigned settings/audit pages.
 - Role-aware navigation: students see Dashboard / My Academics / OD / Medical / Alerts / Profile / Logout; staff/HOD see their operational pages plus Medical Review for HOD/advisor; admin additionally sees Semesters and Face Attendance.
 - Admin-managed semesters (`semesters` table) with one current semester; legacy settings are seeded/synced for compatibility.
 - Student dashboard and staff reports/records accept a semester dropdown. Current semester runs start..today; completed semester runs start..last scheduled working day.
@@ -177,6 +179,9 @@ Verified recently:
 - Local Phase 5 smoke test passed `46/46` on a temporary DB with a fixed IST clock (`2026-11-16 12:00`). It covers certificate validation, one-active-request enforcement, advisor/HOD scoping and approvals, due-date crediting, medical locks, dashboard/CSV crediting, certificate access, cancellation/reversal, rejections, future deferral, history scoping, and page/nav rendering.
 - Local Phase 6 smoke test passed `36/36` on a temporary DB with recognition monkeypatched for deterministic faces and a generated AVI video. It covers admin-only page/API access, model/limit status, webcam job start, known/unknown capture and dedupe, unknown assignment, stop/review, face-source attendance submit, session/entry confidence and flagged flags, video upload/background status, multi-face aggregation, crop serving, 550 MB limit configuration, video existence, deletion after completion, and job cleanup.
 - Local Phase 7 scale check passed `29/29` on a temporary DB with 75 synthetic students and deterministic monkeypatched detections. It covers the 75-row roster, 80-face worker setting, 60 unique matched students, unknown dedupe/cap, 75-row attendance submission, video deletion after completion, stale-video TTL deletion, unsupported-format rejection, and zero test-file leftovers.
+- Wave 1 smoke test passed `29/29` on a temporary DB. It covers admin page rendering, staff create/profile persistence/deactivate/reactivate/archive and login enforcement, student role storage for Representative/Ambassador/custom/blank roles, `rep_badge()` behavior, settings metadata and clamps, and audit filters/search/elective compatibility.
+- Wave 1 guarded real-DB migration completed with backup `C:\Users\alagu\AppData\Local\Temp\opencode\wave1_attendance_backup_pre_migration.db`; it added the Wave 1 user profile columns, `students.student_role`, and audit indexes. Existing four students currently have blank roles.
+- Re-run after Wave 1: `phase1_redesign` all passed; Phase 3 `17/17`, Phase 4 `23/23`, Phase 5 `46/46`, Phase 6 `36/36`, and Phase A/B `33/33` passed. Phase 7 reported `28/29` only because its final assertion expects the shared face-crop upload directory to be empty and pre-existing crop files were present. `phase_cd_smoke` reported `18/19` only because its copied real DB contains an overlapping `2025-08-01..2025-12-31` semester; a clean probe confirmed `attendance_edit_allowed()` correctly closes after `2025-09-01`. Neither failure is a Wave 1 code regression.
 
 Important current local data state:
 
@@ -482,6 +487,38 @@ Verification: `python -m py_compile app.py` passes; a 33-check temporary-DB smok
 - Phase 7 scale check passed `29/29` on a temporary DB with a synthetic 75-student class, a generated video, and deterministic monkeypatched detections. It covers a 75-row roster, 80-face worker configuration, 60 unique matched students, unknown dedupe, unknown-group cap, 75-row attendance submission and entry storage, video deletion after completion, stale-video TTL deletion, unsupported-format rejection, and zero test-file leftovers.
 - Full server-side regression suite still passes after the scaling changes. Remaining verification is manual browser UI (camera permission, upload progress, tabs/polling) and real classroom recognition accuracy; both require real devices/footage.
 
+### Redesign Phase 1 - Admin/student foundation (completed server-side; manual UI pending)
+
+- Added `batch_year` and `study_year` columns to `students`, with backfill from class; `24IIT5A` maps to batch `2024-2028` and study year `3`.
+- Updated `add_student`, `admin_edit_student`, `admin_students_page`, and `/students` to validate/return the new fields.
+- Added read-only `/admin/students/<student_id>/attendance` with semester/date/status/period filters and total/credited/absent/percentage summary.
+- Rebuilt `templates/students_list.html` with search, class/batch/year/gender/status/date filters, sorting, KPI cards, photo counts, and detail links.
+- Added batch/year fields to add/edit student forms with class-based auto-fill.
+- Removed the legacy admin attendance chart, staff legacy feed, and attendance raw-log UI; old DB rows remain intact.
+- Verification: `python -m py_compile app.py model.py`, `git diff --check`, temp-DB `phase1_redesign_check.py`, and guarded real-DB migration all passed. Manual responsive UI checklist remains before Phase 2.
+
+### Consolidated Wave Plan (approved)
+
+- Wave 1 — foundation closeout, student role, staff management, settings/audit (completed server-side; browser verification pending).
+- Wave 2 — academic calendar polish, timetable polish, electives polish, real `N` attendance status, hyphen `-` unmarked policy, and staff unmarked-period reminders.
+- Wave 3 — webcam/camera fixes and optional YuNet/SFace model upgrade.
+- Wave 4 — records/reports finalization and final QA/handoff.
+
+Approved Wave 1 student-role rule:
+- `student_role` is optional, selected from dropdown presets or custom text.
+- Blank roles display nothing.
+- Non-Representative roles appear only on Student Details.
+- `Representative` renders as `Rep` beside the student name across UI surfaces.
+- CSV/report exports remain unchanged.
+
+Approved Wave 2 attendance rule (not yet implemented):
+- Replace automatic `Absent` with stored `-` rows.
+- From class date `06:00` onward, scheduled unmarked periods show `-` until explicitly marked.
+- Present, Absent, OD, Late, N, and Medical Leave stop `-`.
+- Staff marking window: class date `06:00` to 15th day `22:00`; HOD/Admin corrections remain open until semester end.
+- Existing `source='auto_absent'` rows should be converted to `-`.
+- Reminders are in-app only: daily digest to assigned staff from the next day until marked, stopping after the 15-day window.
+
 ## 8. Credentials and Seeding
 
 Known development credentials:
@@ -522,7 +559,7 @@ Confirm actual passwords and ids by querying the DB if seeding has changed. Neve
 - `templates/attendance_record.html`: Phase 4 staff-scoped period log/student summary with absence filter.
 - `templates/student_dashboard.html`: student dashboard with goal calculator, monthly heatmap, threshold warning, subject/elective breakdown, today/next class, and export.
 - `templates/login.html`: standalone 3-tab login shell.
-- `static/js/erp.js`: `erp.esc`, `erp.toast`, `erp.fetchJSON`, `erp.setLoading`.
+- `static/js/erp.js`: `erp.esc`, `erp.toast`, `erp.fetchJSON`, `erp.setLoading`, `erp.repBadge`, `erp.repText`.
 - `static/js/student_dashboard.js`: dashboard data, alerts, read-all, push subscribe, goal calculator, monthly heatmap, subject/elective breakdown, threshold warning, and export binding.
 - `static/sw.js`: service worker for Web Push.
 - `static/css/erp.css`: ERP design system.
@@ -672,7 +709,10 @@ Use the `grep` tool for deeper searches.
    - Local Phase 5: medical leave and student analytics (completed)
    - Local Phase 6: admin webcam/video attendance (completed; SFace optional if real accuracy testing requires it)
    - Local Phase 7: verification and cleanup (completed server-side; manual browser/real-footage checks remain)
-   - Next: deployment-machine/browser verification and real classroom accuracy testing when data is available
+   - Redesign Phase 1: admin/student foundation (completed server-side; manual responsive UI checklist pending)
+   - Wave 1: student role, staff management, settings/audit (completed server-side; manual browser verification pending)
+   - Next: manual browser verification of Wave 1, then Wave 2 (`N` status, `-` unmarked policy, reminders, calendar/timetable/electives polish)
+   - Deployment-machine/browser verification and real classroom accuracy testing remain when data is available
    - Cloud/R2/Postgres/CCTV remain deferred until staff approval
    - Real-channel notification delivery still requires SMTP/Fast2SMS/VAPID credentials
 5. Do not commit unless the user explicitly asks.

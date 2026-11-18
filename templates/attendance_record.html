@@ -37,9 +37,9 @@
           <tbody>
           {% for r in session_rows or [] %}
             <tr>
-              <td>{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td><td>{{ r[3] }}</td><td>{{ r[4] }}</td><td>{{ r[5] or '-' }}</td>
+              <td>{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td><td>{{ r[3] }}</td><td>{{ rep_badge(session_roles.get(r[10])) }}{{ r[4] }}</td><td>{{ r[5] or '-' }}</td>
               <td>{% if r[6]=='Absent' %}<span class="badge bg-danger">Absent</span>{% elif r[6]=='OD' %}<span class="badge bg-primary">OD</span>{% elif r[6]=='Late' %}<span class="badge bg-warning text-dark">Late</span>{% else %}<span class="badge bg-success">{{ r[6] }}</span>{% endif %}</td>
-              <td class="small">{{ r[7] or '-' }}</td><td class="small text-muted">{{ r[8] or '' }}</td><td class="small">{{ r[10] or '-' }}</td>
+              <td class="small">{{ r[7] or '-' }}</td><td class="small text-muted">{{ r[8] or '' }}</td><td class="small">{{ r[11] or '-' }}</td>
             </tr>
           {% else %}
             <tr><td colspan="10" class="text-center text-muted">No submitted period attendance yet. Staff can mark via <a href="/take_attendance">Take Attendance</a>.</td></tr>
@@ -53,15 +53,8 @@
       <h5 class="mb-2">Student Summary (selected view)</h5>
       <div class="table-responsive"><table class="table table-sm table-striped align-middle"><thead class="table-dark"><tr><th>Name</th><th>Reg No</th><th>Class</th><th>Present/OD</th><th>Absent</th><th>Total</th><th>%</th></tr></thead><tbody>
       {% for r in report_rows or [] %}
-        <tr><td>{{ r.name }}</td><td>{{ r.reg_no }}</td><td>{{ r.class }}</td><td>{{ r.present }}</td><td>{{ r.absent }}</td><td>{{ r.total }}</td><td><strong>{{ r.pct }}%</strong></td></tr>
+        <tr><td>{{ rep_badge(r.student_role) }}{{ r.name }}</td><td>{{ r.reg_no }}</td><td>{{ r.class }}</td><td>{{ r.present }}</td><td>{{ r.absent }}</td><td>{{ r.total }}</td><td><strong>{{ r.pct }}%</strong></td></tr>
       {% else %}<tr><td colspan="7" class="text-center text-muted">No summary data.</td></tr>{% endfor %}
-      </tbody></table></div>
-    </div>
-
-    <div class="card p-3 shadow-sm glass-card">
-      <div class="d-flex justify-content-between align-items-center mb-2"><h6 class="mb-0">Legacy Raw Log</h6><a class="btn btn-outline-primary btn-sm" href="/download_csv?period={{ period }}">Download Raw CSV</a></div>
-      <div class="table-responsive" style="max-height:220px;overflow:auto"><table class="table table-sm table-striped"><thead class="table-dark"><tr><th>ID</th><th>Student ID</th><th>Name</th><th>Timestamp (UTC)</th></tr></thead><tbody>
-      {% for r in records %}<tr><td>{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td><td>{{ r[3] }}</td></tr>{% else %}<tr><td colspan="4" class="text-center text-muted">No legacy records.</td></tr>{% endfor %}
       </tbody></table></div>
     </div>
   </div>

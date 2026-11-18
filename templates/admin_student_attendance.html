@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Student Attendance - {{ student.name }}{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 px-md-2">
+  <div class="card erp-card p-3 mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <h5 class="erp-section-title mb-1">{{ rep_badge(student.student_role) }}{{ student.name }}</h5>
+        <div class="erp-muted">
+          ID {{ student.id }} · Reg No {{ student.reg_no or '-' }} · {{ student.class or '-' }}{% if student.section %} {{ student.section }}{% endif %}
+          · Batch {{ student.batch_year or '-' }} · Year {{ student.study_year or '-' }} · {{ student.gender or '-' }}{% if student.student_role %} · Role {{ student.student_role }}{% endif %}
+        </div>
+      </div>
+      <a class="btn btn-outline-secondary btn-sm" href="/admin/students">Back to Students</a>
+    </div>
+  </div>
+
+  <div class="card erp-card p-3 mb-3">
+    <div class="erp-muted mb-2">Read-only view. Use Take Attendance or Records to change attendance.</div>
+    <form class="row g-2" method="get">
+      <div class="col-6 col-md-3"><select name="semester_id" class="form-select form-select-sm">
+        <option value="">All semesters</option>
+        {% for s in semesters %}<option value="{{ s.id }}" {% if semester_id|string == s.id|string %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+      </select></div>
+      <div class="col-6 col-md-2"><input class="form-control form-control-sm" type="date" name="from" value="{{ date_from }}"></div>
+      <div class="col-6 col-md-2"><input class="form-control form-control-sm" type="date" name="to" value="{{ date_to }}"></div>
+      <div class="col-6 col-md-2"><select name="status" class="form-select form-select-sm">
+        <option value="">All statuses</option>
+        {% for st in ['Present','Absent','Late','OD','Medical Leave'] %}<option value="{{ st }}" {% if status == st %}selected{% endif %}>{{ st }}</option>{% endfor %}
+      </select></div>
+      <div class="col-6 col-md-2"><select name="period" class="form-select form-select-sm">
+        <option value="">All periods</option>
+        {% for p in range(1,8) %}<option value="{{ p }}" {% if period == p|string %}selected{% endif %}>P{{ p }}</option>{% endfor %}
+      </select></div>
+      <div class="col-12 col-md-1"><button class="btn btn-primary btn-sm w-100">Filter</button></div>
+    </form>
+  </div>
+
+  <div class="row g-2 mb-3">
+    <div class="col-6 col-md-3"><div class="card erp-card p-2 erp-kpi"><div class="label">Records</div><div class="value">{{ summary.total }}</div><div class="sub">matching filter</div></div></div>
+    <div class="col-6 col-md-3"><div class="card erp-card p-2 erp-kpi"><div class="label">Credited</div><div class="value text-success">{{ summary.credited }}</div><div class="sub">Present / Late / OD / Medical</div></div></div>
+    <div class="col-6 col-md-3"><div class="card erp-card p-2 erp-kpi"><div class="label">Absent</div><div class="value text-danger">{{ summary.absent }}</div><div class="sub">including N</div></div></div>
+    <div class="col-6 col-md-3"><div class="card erp-card p-2 erp-kpi"><div class="label">Percentage</div><div class="value">{{ summary.percentage }}%</div><div class="sub">credited / records</div></div></div>
+  </div>
+
+  <div class="card erp-card p-3">
+    <div class="erp-table-wrap" style="max-height:70vh">
+      <table class="table table-sm erp-table align-middle mb-0">
+        <thead><tr><th>Date</th><th>Period</th><th>Class</th><th>Subject</th><th>Status</th><th>Source</th><th>Marked By</th><th>Updated</th></tr></thead>
+        <tbody>
+        {% for d in details %}
+          <tr>
+            <td>{{ d.date }}</td>
+            <td>P{{ d.period }}</td>
+            <td>{{ d.class or '-' }}</td>
+            <td>{{ d.subject or '-' }}</td>
+            <td>
+              {% if d.status == 'Absent' %}<span class="badge bg-danger">Absent</span>
+              {% elif d.status == 'OD' %}<span class="badge bg-primary">OD</span>
+              {% elif d.status == 'Late' %}<span class="badge bg-warning text-dark">Late</span>
+              {% elif d.status == 'N' %}<span class="badge bg-dark">N</span>
+              {% else %}<span class="badge bg-success">{{ d.status or '-' }}</span>{% endif %}
+            </td>
+            <td class="small">{{ d.source or '-' }}</td>
+            <td class="small">{{ d.marked_by or '-' }}</td>
+            <td class="small text-muted">{{ d.updated_at or d.submitted_at or '' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="erp-empty">No attendance records for these filters.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

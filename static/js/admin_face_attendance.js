@@ -134,7 +134,7 @@
     if (!faces.length) { $('faceUnknownList').innerHTML = ''; return; }
     const used = new Set(matchedFaces(activeJob).map((f) => String(f.student_id)));
     const options = roster.filter((s) => !used.has(String(s.id)))
-      .map((s) => `<option value="${s.id}">${esc(s.name)} (${esc(s.reg_no || s.roll || s.id)})</option>`).join('');
+      .map((s) => `<option value="${s.id}">${String(s.student_role || '').toLowerCase() === 'representative' ? 'Rep ' : ''}${esc(s.name)} (${esc(s.reg_no || s.roll || s.id)})</option>`).join('');
     $('faceUnknownList').innerHTML = faces.map((f) => {
       const conf = f.match_confidence != null ? Math.round(Number(f.match_confidence) * 100) : 0;
       return `<div class="face-unknown-card border rounded p-2 bg-white">
@@ -174,7 +174,7 @@
         ? `<span class="badge ${flagged ? 'bg-warning text-dark' : 'bg-success'}">${conf == null ? 'matched' : conf + '%'}</span>${flagged ? ' <span class="badge bg-warning text-dark">Review</span>' : ''}`
         : '<span class="text-muted small">-</span>';
       return `<tr class="${f ? 'face-match-row' : ''}">
-        <td><div class="fw-semibold">${esc(s.name)}</div><div class="small text-muted">${esc(s.reg_no || '')}</div></td>
+        <td><div class="fw-semibold">${erp.repBadge(s.student_role)}${esc(s.name)}</div><div class="small text-muted">${esc(s.reg_no || '')}</div></td>
         <td class="small">${esc(s.roll || '')}${s.roll ? ' / ' : ''}${esc(s.reg_no || '')}</td>
         <td>${match}</td>
         <td class="text-nowrap">${btn('Present', 'P', 'btn-success')} ${btn('Absent', 'A', 'btn-danger')} ${btn('Late', 'L', 'btn-info')} ${btn('OD', 'OD', 'btn-primary')}</td>
@@ -206,7 +206,7 @@
     const known = faces.filter((f) => f.kind === 'student');
     const unknown = faces.filter((f) => f.kind === 'unknown');
     $('webcamCaptures').innerHTML = `<div class="mb-1">${known.length} matched student(s), ${unknown.length} unknown face group(s).</div>` +
-      (known.length ? known.map((f) => `<div class="small">✓ ${esc(f.student_name || 'Student')} <span class="text-muted">${Math.round(Number(f.match_confidence || 0) * 100)}%</span></div>`).join('') : '<div class="small text-muted">No captures yet.</div>');
+      (known.length ? known.map((f) => `<div class="small">✓ ${erp.repBadge(f.student_role)}${esc(f.student_name || 'Student')} <span class="text-muted">${Math.round(Number(f.match_confidence || 0) * 100)}%</span></div>`).join('') : '<div class="small text-muted">No captures yet.</div>');
   }
 
   function setActiveJob(job, reset) {

@@ -1,60 +1,182 @@
 {% extends "base.html" %}
-{% block title %}Students{% endblock %}
-{% block head %}
-  <style>
-    .student-card { border-radius: 12px; }
-    .student-photo { width: 100%; height: 180px; object-fit: cover; border-radius: 10px; background:#f1f5f9; }
-  </style>
-{% endblock %}
+{% block title %}Registered Students{% endblock %}
 {% block content %}
-  <div class="container">
-    <div class="card p-4 shadow-sm glass-card">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="mb-0">Registered Students</h4>
-        <span class="badge bg-primary">{{ students|length }} total</span>
+<div class="container-fluid px-0 px-md-2">
+  <div class="card erp-card p-3 mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+      <div>
+        <h5 class="erp-section-title mb-1">Registered Students</h5>
+        <div class="erp-muted">Filter, sort, and open a read-only attendance summary for any student.</div>
       </div>
-
-      {% if not students %}
-        <div class="alert alert-warning mb-0">No students added yet. Use <a href="/add_student">Add Student</a> to enroll.</div>
-      {% else %}
-      <div class="row g-3">
-        {% for s in students %}
-        <div class="col-md-6 col-lg-4">
-          <div class="card student-card shadow-sm h-100">
-            {% if s.image_count > 0 %}
-              <img class="student-photo" src="/student_photo/{{ s.id }}" alt="{{ s.name }}">
-            {% else %}
-              <div class="student-photo d-flex align-items-center justify-content-center text-muted small">No photo</div>
-            {% endif %}
-            <div class="card-body">
-              <h6 class="card-title mb-1">{{ s.name }}</h6>
-              <div class="small text-muted mb-2">ID: {{ s.id }} &middot; Images: {{ s.image_count }}</div>
-              <div class="small"><strong>Roll:</strong> {{ s.roll or '-' }}</div>
-              <div class="small"><strong>Class:</strong> {{ s.class or '-' }} {% if s.section %}({{ s.section }}){% endif %}</div>
-              <div class="small"><strong>Reg No:</strong> {{ s.reg_no or '-' }}</div>
-              <div class="small"><strong>DOB:</strong> {{ s.dob or '-' }}</div>
-              <div class="small text-muted">{{ s.phone or '' }} {{ s.email or '' }}</div>
-              <div class="small text-muted mt-1">{{ s.created_at or '' }}</div>
-              <div class="d-flex gap-1 mt-2"><a class="btn btn-sm btn-outline-primary w-100" href="/admin/students/{{ s.id }}/edit">Edit</a><button class="btn btn-sm btn-outline-danger w-100" onclick="deleteStudent({{ s.id }}, '{{ s.name|e }}')">Delete</button></div>
-            </div>
-          </div>
-        </div>
-        {% endfor %}
+      <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-outline-primary btn-sm" href="/add_student">Add Student</a>
+        <button class="btn btn-outline-secondary btn-sm" id="resetStudentFilters" type="button">Reset</button>
       </div>
-      {% endif %}
+    </div>
+    <div class="row g-2 mb-3">
+      <div class="col-6 col-md-3 col-xl-2"><div class="card erp-card p-2 erp-kpi"><div class="label">Total</div><div class="value" id="kTotal">0</div><div class="sub">matched</div></div></div>
+      <div class="col-6 col-md-3 col-xl-2"><div class="card erp-card p-2 erp-kpi"><div class="label">Active</div><div class="value text-success" id="kActive">0</div><div class="sub">can log in</div></div></div>
+      <div class="col-6 col-md-3 col-xl-2"><div class="card erp-card p-2 erp-kpi"><div class="label">Inactive</div><div class="value text-warning" id="kInactive">0</div><div class="sub">disabled</div></div></div>
+      <div class="col-6 col-md-3 col-xl-2"><div class="card erp-card p-2 erp-kpi"><div class="label">With Photos</div><div class="value" id="kPhotos">0</div><div class="sub">training images</div></div></div>
+    </div>
+    <div class="row g-2">
+      <div class="col-12 col-md-4"><input id="fSearch" class="form-control form-control-sm" placeholder="Search name / roll / reg no / email / phone"></div>
+      <div class="col-6 col-md-2"><select id="fClass" class="form-select form-select-sm"><option value="">All classes</option></select></div>
+      <div class="col-6 col-md-2"><select id="fBatch" class="form-select form-select-sm"><option value="">All batches</option></select></div>
+      <div class="col-6 col-md-2"><select id="fStudy" class="form-select form-select-sm"><option value="">All years</option></select></div>
+      <div class="col-6 col-md-2"><select id="fGender" class="form-select form-select-sm"><option value="">All genders</option></select></div>
+      <div class="col-6 col-md-2"><select id="fStatus" class="form-select form-select-sm"><option value="">Any status</option><option value="1">Active</option><option value="0">Inactive</option></select></div>
+      <div class="col-6 col-md-2"><input id="fFrom" class="form-control form-control-sm" type="date" title="Added from"></div>
+      <div class="col-6 col-md-2"><input id="fTo" class="form-control form-control-sm" type="date" title="Added to"></div>
+      <div class="col-6 col-md-4"><select id="fSort" class="form-select form-select-sm">
+        <option value="name">Sort by Name</option>
+        <option value="roll">Sort by Roll</option>
+        <option value="reg_no">Sort by Register No</option>
+        <option value="class">Sort by Class</option>
+        <option value="batch_year">Sort by Batch</option>
+        <option value="study_year">Sort by Study Year</option>
+        <option value="gender">Sort by Gender</option>
+        <option value="active">Sort by Status</option>
+        <option value="image_count">Sort by Photo Count</option>
+        <option value="created_at">Sort by Added Date</option>
+        <option value="id">Sort by Student ID</option>
+      </select></div>
+      <div class="col-6 col-md-2"><select id="fDir" class="form-select form-select-sm"><option value="asc">Ascending</option><option value="desc">Descending</option></select></div>
     </div>
   </div>
+  <div class="card erp-card p-3">
+    <div class="erp-table-wrap">
+      <table class="table table-sm erp-table align-middle mb-0">
+        <thead><tr>
+          <th>Photo</th>
+          <th data-sort="name" role="button">Student</th>
+          <th data-sort="roll" role="button">Roll</th>
+          <th data-sort="reg_no" role="button">Reg No</th>
+          <th data-sort="class" role="button">Class</th>
+          <th data-sort="batch_year" role="button">Batch</th>
+          <th data-sort="study_year" role="button">Year</th>
+          <th data-sort="gender" role="button">Gender</th>
+          <th data-sort="active" role="button">Status</th>
+          <th data-sort="image_count" role="button">Photos</th>
+          <th data-sort="created_at" role="button">Added</th>
+          <th>Actions</th>
+        </tr></thead>
+        <tbody id="studentBody"><tr><td colspan="12" class="erp-empty">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
+const STUDENTS = {{ students|tojson }};
+const $ = id => document.getElementById(id);
+let sortField = 'name';
+let sortDir = 'asc';
+
+function fillOptions() {
+  const fields = [['fClass','class'],['fBatch','batch_year'],['fStudy','study_year'],['fGender','gender']];
+  fields.forEach(([id,key]) => {
+    const values = [...new Set(STUDENTS.map(s => String(s[key] || '')).filter(Boolean))].sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
+    values.forEach(value => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      $(id).appendChild(option);
+    });
+  });
+}
+
+function filteredStudents() {
+  const q = ($('fSearch').value || '').trim().toLowerCase();
+  const cls = $('fClass').value;
+  const batch = $('fBatch').value;
+  const study = $('fStudy').value;
+  const gender = $('fGender').value;
+  const status = $('fStatus').value;
+  const from = $('fFrom').value;
+  const to = $('fTo').value;
+  const rows = STUDENTS.filter(s => {
+    const hay = [s.name,s.roll,s.reg_no,s.email,s.phone,s.class,s.batch_year,s.study_year].join(' ').toLowerCase();
+    const added = String(s.created_at || '').slice(0,10);
+    return (!q || hay.includes(q)) && (!cls || s.class === cls) && (!batch || s.batch_year === batch) &&
+      (!study || String(s.study_year) === study) && (!gender || s.gender === gender) &&
+      (status === '' || String(s.active) === status) && (!from || (added && added >= from)) &&
+      (!to || (added && added <= to));
+  });
+  rows.sort((a,b) => {
+    let av = a[sortField], bv = b[sortField];
+    if (sortField === 'active') { av = Number(a.active || 0); bv = Number(b.active || 0); }
+    else if (sortField === 'study_year' || sortField === 'image_count' || sortField === 'id') { av = Number(av || 0); bv = Number(bv || 0); }
+    else { av = String(av || '').toLowerCase(); bv = String(bv || '').toLowerCase(); }
+    let result = av < bv ? -1 : av > bv ? 1 : 0;
+    return sortDir === 'desc' ? -result : result;
+  });
+  return rows;
+}
+
+function statusBadge(active) {
+  return active ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>';
+}
+
+function render() {
+  const rows = filteredStudents();
+  $('kTotal').textContent = rows.length;
+  $('kActive').textContent = rows.filter(s => Number(s.active) === 1).length;
+  $('kInactive').textContent = rows.filter(s => Number(s.active) !== 1).length;
+  $('kPhotos').textContent = rows.filter(s => Number(s.image_count) > 0).length;
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.textContent = th.textContent.replace(/[\u25B2\u25BC]$/,'').trim();
+    if (th.dataset.sort === sortField) th.textContent += sortDir === 'asc' ? ' \u25B2' : ' \u25BC';
+  });
+  $('studentBody').innerHTML = rows.length ? rows.map(s => `
+    <tr>
+      <td>${s.image_count > 0 ? `<img src="/student_photo/${s.id}" class="face-crop" alt="" style="width:42px;height:42px">` : '<span class="text-muted small">No photo</span>'}</td>
+      <td class="fw-semibold">${erp.repBadge(s.student_role)}${erp.esc(s.name)}</td>
+      <td>${erp.esc(s.roll || '-')}</td>
+      <td>${erp.esc(s.reg_no || '-')}</td>
+      <td>${erp.esc(s.class || '-')}</td>
+      <td>${erp.esc(s.batch_year || '-')}</td>
+      <td>${s.study_year || '-'}</td>
+      <td>${erp.esc(s.gender || '-')}</td>
+      <td>${statusBadge(Number(s.active) === 1)}</td>
+      <td>${Number(s.image_count) || 0}</td>
+      <td class="small text-muted">${erp.esc(String(s.created_at || '').slice(0,10))}</td>
+      <td><div class="d-flex gap-1 flex-wrap">
+        <a class="btn btn-sm btn-outline-primary" href="/admin/students/${s.id}/attendance">Attendance</a>
+        <a class="btn btn-sm btn-outline-secondary" href="/admin/students/${s.id}/edit">Edit</a>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteStudent(${s.id}, '${erp.esc(s.name).replace(/'/g,"\\'")}')">Delete</button>
+      </div></td>
+    </tr>`).join('') : '<tr><td colspan="12" class="erp-empty">No students match these filters.</td></tr>';
+}
+
 async function deleteStudent(id, name) {
   if (!confirm(`Delete ${name} (ID ${id})? This removes their images and records.`)) return;
   try {
     const res = await fetch(`/students/${id}`, { method: 'DELETE' });
     const data = await res.json().catch(()=>({}));
     if (res.ok && data.deleted) location.reload();
-    else alert('Delete failed.');
-  } catch (e) { alert('Network error.'); }
+    else erp.toast(data.error || 'Delete failed.', 'danger');
+  } catch (e) { erp.toast('Network error.', 'danger'); }
 }
+
+document.querySelectorAll('th[data-sort]').forEach(th => th.addEventListener('click', () => {
+  if (sortField === th.dataset.sort) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  else { sortField = th.dataset.sort; sortDir = 'asc'; }
+  $('fSort').value = sortField;
+  $('fDir').value = sortDir;
+  render();
+}));
+['fSearch','fClass','fBatch','fStudy','fGender','fStatus','fFrom','fTo'].forEach(id => $(id).addEventListener('input', render));
+['fClass','fBatch','fStudy','fGender','fStatus'].forEach(id => $(id).addEventListener('change', render));
+$('fSort').addEventListener('change', () => { sortField = $('fSort').value; render(); });
+$('fDir').addEventListener('change', () => { sortDir = $('fDir').value; render(); });
+$('resetStudentFilters').addEventListener('click', () => {
+  ['fSearch','fClass','fBatch','fStudy','fGender','fStatus','fFrom','fTo'].forEach(id => $(id).value = '');
+  sortField = 'name'; sortDir = 'asc'; $('fSort').value = sortField; $('fDir').value = sortDir;
+  render();
+});
+fillOptions();
+render();
 </script>
 {% endblock %}

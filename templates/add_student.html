@@ -11,8 +11,12 @@
           <div class="col-md-2"><label class="form-label small">Roll No.</label><input class="form-control" name="roll"></div>
           <div class="col-md-3"><label class="form-label small">Register No. (login) *</label><input class="form-control" name="reg_no" required></div>
           <div class="col-md-3"><label class="form-label small">DOB (login) *</label><input class="form-control" type="date" name="dob" required></div>
-          <div class="col-md-3"><label class="form-label small">Class *</label><select class="form-select" name="class" required><option value="">Select</option>{% for c in classes %}<option value="{{c}}">{{c}}</option>{% endfor %}</select></div>
+          <div class="col-md-3"><label class="form-label small">Class *</label><select class="form-select" name="class" id="addClassSelect" required><option value="">Select</option>{% for c in classes %}<option value="{{c}}">{{c}}</option>{% endfor %}</select></div>
+          <div class="col-md-2"><label class="form-label small">Batch Year</label><input class="form-control" name="batch_year" id="addBatchYear" placeholder="2024-2028"></div>
+          <div class="col-md-2"><label class="form-label small">Study Year</label><select class="form-select" name="study_year" id="addStudyYear"><option value="">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
           <div class="col-md-2"><label class="form-label small">Section</label><input class="form-control" name="sec"></div>
+          <div class="col-md-3"><label class="form-label small">Student Role</label><select class="form-select" name="student_role" id="addStudentRole"><option value="">No role</option>{% for r in role_presets %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select></div>
+          <div class="col-md-3" id="addStudentRoleCustomWrap" style="display:none"><label class="form-label small">Custom Role</label><input class="form-control" name="student_role_custom" id="addStudentRoleCustom" maxlength="60" placeholder="e.g. Sports Captain"></div>
           <div class="col-md-2"><label class="form-label small">Gender</label><input class="form-control" name="gender"></div>
           <div class="col-md-2"><label class="form-label small">Blood Group</label><input class="form-control" name="blood_group"></div>
           <div class="col-md-3"><label class="form-label small">Phone</label><input class="form-control" name="phone"></div>
@@ -40,4 +44,30 @@
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/camera_add_student.js') }}"></script>
+<script>
+(function () {
+  const cls = document.getElementById('addClassSelect');
+  const batch = document.getElementById('addBatchYear');
+  const study = document.getElementById('addStudyYear');
+  function autoFill() {
+    const match = (cls.value || '').toUpperCase().match(/^(\d{2})[A-Z]*(\d+)[A-Z0-9]*$/);
+    if (!match) return;
+    const start = 2000 + Number(match[1]);
+    batch.value = start + '-' + (start + 4);
+    study.value = String(Math.min(4, Math.max(1, Math.ceil(Number(match[2]) / 2))));
+  }
+  cls.addEventListener('change', autoFill);
+
+  const role = document.getElementById('addStudentRole');
+  const customWrap = document.getElementById('addStudentRoleCustomWrap');
+  const custom = document.getElementById('addStudentRoleCustom');
+  function toggleRole() {
+    const show = role.value === 'Other';
+    customWrap.style.display = show ? '' : 'none';
+    if (!show) custom.value = '';
+  }
+  role.addEventListener('change', toggleRole);
+  toggleRole();
+})();
+</script>
 {% endblock %}

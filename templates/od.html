@@ -126,7 +126,7 @@ async function loadPending(){
     if(!btns) btns='<span class="small text-muted">No action</span>';
     const hodDisp = x.hod_decision_display || ((x.advisor_decision==='rejected')?'NIL':(x.hod_decision||'-'));
     return `<tr>
-    <td>${x.id}</td><td>${esc(x.student_name)}<div class="small text-muted">${esc(x.reg_no||'')}</div></td><td>${esc(x.class_name)}</td>
+    <td>${x.id}</td><td>${erp.repBadge(x.student_role)}${esc(x.student_name)}<div class="small text-muted">${esc(x.reg_no||'')}</div></td><td>${esc(x.class_name)}</td>
     <td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' â†’ '+esc(x.to_date):''}<div class="text-muted">${esc(scopeText(x))}</div></td>
     <td class="small">${esc(x.reason)}${(x.advisor_decision||x.hod_decision)?`<div class="text-muted">Adv: ${esc(x.advisor_decision||'-')} | HOD: ${esc(hodDisp)}</div>`:''}</td><td>${badge(x.status)}</td>
     <td>${x.proof_name?`<a class="btn btn-outline-secondary btn-sm" href="/api/od/proof/${x.id}">Proof</a>`:'<span class="small text-muted">No proof</span>'}</td>
@@ -156,7 +156,7 @@ async function loadOdHistory(){
     const rows=d.requests||[];
     $('odHistBody').innerHTML=rows.length?rows.map(x=>{
       const hodDisp=x.hod_decision_display||((x.advisor_decision==='rejected')?'NIL':(x.hod_decision||'-'));
-      return `<tr><td>${x.id}</td><td>${esc(x.student_name)}<div class="small text-muted">${esc(x.reg_no||'')}</div></td><td>${esc(x.class_name)}</td><td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' to '+esc(x.to_date):''}<div class="text-muted">${esc(scopeText(x))}</div></td><td>${badge(x.status)}<div class="small text-muted">${esc(x.status_label||'')}</div></td><td class="small">${esc(x.advisor_decision||'-')}</td><td class="small">${esc(hodDisp)}</td><td class="small text-muted">${esc((x.updated_at||'').slice(0,19).replace('T',' '))}</td></tr>`;
+      return `<tr><td>${x.id}</td><td>${erp.repBadge(x.student_role)}${esc(x.student_name)}<div class="small text-muted">${esc(x.reg_no||'')}</div></td><td>${esc(x.class_name)}</td><td class="small">${esc(x.from_date)}${x.to_date&&x.to_date!==x.from_date?' to '+esc(x.to_date):''}<div class="text-muted">${esc(scopeText(x))}</div></td><td>${badge(x.status)}<div class="small text-muted">${esc(x.status_label||'')}</div></td><td class="small">${esc(x.advisor_decision||'-')}</td><td class="small">${esc(hodDisp)}</td><td class="small text-muted">${esc((x.updated_at||'').slice(0,19).replace('T',' '))}</td></tr>`;
     }).join(''):'<tr><td colspan="8" class="small text-muted">No OD history for these filters.</td></tr>';
   }catch(e){ $('odHistBody').innerHTML='<tr><td colspan="8" class="small text-danger">Could not load OD history.</td></tr>'; }
 }
