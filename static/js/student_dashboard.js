@@ -10,19 +10,23 @@ document.addEventListener('DOMContentLoaded', () => {
   function stClass(st){
     if (st==='Present') return 'st-Present';
     if (st==='Absent') return 'st-Absent';
+    if (st==='N') return 'st-N';
     if (st==='OD') return 'st-OD';
     if (st==='Late') return 'st-Late';
     if (st==='Medical Leave') return 'st-MedicalLeave';
     if (st==='NA') return 'st-NA';
+    if (st==='-') return 'st-Unmarked';
     return 'st-NotMarked';
   }
   function stLabel(st){
     if (st==='Present') return 'P';
     if (st==='Absent') return 'A';
+    if (st==='N') return 'N';
     if (st==='OD') return 'OD';
     if (st==='Late') return 'L';
     if (st==='Medical Leave') return 'ML';
     if (st==='NA') return '';
+    if (st==='-') return '-';
     return '?';
   }
   function fmtDate(iso){
@@ -75,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const c=(row.periods||{})[String(p)]||{};
         if(c.status==='NA'||!c.scheduled){ counts.na++; continue; }
         if(['Present','Late','OD','Medical Leave'].includes(c.status)) counts.good++;
-        else if(c.status==='Absent') counts.bad++;
+        else if(['Absent','N'].includes(c.status)) counts.bad++;
         else counts.neutral++;
       }
       let cls='heat-future';
@@ -130,7 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('mAbsentP').textContent = o.absent_periods ?? 0;
     $('mNotMarked').textContent = o.not_marked_periods ?? 0;
     if($('overviewDetail')){
-      $('overviewDetail').textContent = `Periods: ${o.present_periods??0} present, ${o.late_periods??0} late, ${o.od_periods??0} OD, ${o.medical_periods??0} medical, ${o.absent_periods??0} absent (${o.auto_absent_periods??0} default), ${o.not_marked_periods??0} not marked.`;
+      $('overviewDetail').textContent = `Counted periods: ${o.present_periods??0} present, ${o.late_periods??0} late, ${o.od_periods??0} OD, ${o.medical_periods??0} medical, ${o.absent_periods??0} absent (${o.n_periods??0} N). Unmarked: ${o.unmarked_periods??0}; future not marked: ${(o.not_marked_periods??0)-(o.unmarked_periods??0)}.`;
     }
     const targetEl=$('goalTarget');
     if(targetEl && !targetEl.dataset.touched) targetEl.value=String(o.threshold??75);
@@ -175,7 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const c=(row.periods||{})[String(p)]||{status:'NA',period:p};
           const payload = encodeURIComponent(JSON.stringify(c));
           const label=stLabel(c.status);
-          const extra=(c.source==='auto_absent'?'default Absent':c.status||'').replace(/"/g,'&quot;');
+          const extra=(c.status==='-'?'unmarked':c.status||'').replace(/"/g,'&quot;');
           const title = `${fmtDate(row.date)} P${p} ${c.subject_display||''} - ${extra}`.replace(/"/g,'&quot;');
           const dis=c.status==='NA'?'disabled':'';
           tds += `<td><button type="button" class="st-btn ${stClass(c.status)}" data-log="${payload}" ${dis} title="${esc(title)}">${label}</button></td>`;
@@ -206,8 +210,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // audit
     const audit=d.absent_audit||[]; const a=$('auditList');
     a.innerHTML = audit.length ? audit.map(x=>{
-      const src=x.default_absent?'Default Absent (no mark recorded)':(x.marked_by?'Marked by '+esc(x.marked_by):'Recorded');
-      return `<div class="p-2 mb-2 bg-white rounded audit-item small"><div><strong>${esc(fmtDate(x.date))}</strong> - P${esc(x.period)} - ${esc(x.subject||'')}</div><div class="text-muted">Absent | ${esc(src)}</div></div>`;
+      const src=x.status==='N'?'Marked N (absence)':(x.marked_by?'Marked by '+esc(x.marked_by):'Recorded');
+      return `<div class="p-2 mb-2 bg-white rounded audit-item small"><div><strong>${esc(fmtDate(x.date))}</strong> - P${esc(x.period)} - ${esc(x.subject||'')}</div><div class="text-muted">${esc(x.status||'Absent')} | ${esc(src)}</div></div>`;
     }).join('') : '<div class="small text-muted">No absent periods in this range.</div>';
   }
 
@@ -219,8 +223,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function openLog(encoded){
     let c={}; try{ c=JSON.parse(decodeURIComponent(encoded)); }catch(e){}
     const status=c.status||'';
-    const na=status==='NA', notMarked=status==='Not Marked', autoAbsent=c.source==='auto_absent';
-    const badge=status==='Present'?'bg-success':status==='Absent'?'bg-danger':status==='OD'?'bg-primary':status==='Late'?'bg-warning text-dark':status==='Medical Leave'?'bg-info text-dark':'bg-secondary';
+    const na=status==='NA', notMarked=status==='Not Marked', unmarked=status==='-';
+    const badge=status==='Present'?'bg-success':['Absent','N'].includes(status)?'bg-danger':status==='OD'?'bg-primary':status==='Late'?'bg-warning text-dark':status==='Medical Leave'?'bg-info text-dark':'bg-secondary';
     const rows=[];
     rows.push(['Date', esc(fmtDate(c.date))]);
     rows.push(['Period', 'P'+esc(c.period||'-')+(c.subject_display?' - '+esc(c.subject_display):'')]);
@@ -234,8 +238,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     let note='Recorded from staff period attendance, an approved OD workflow, or approved medical leave.';
     if(na) note='No scheduled class for this period.';
-    else if(notMarked) note='This period is scheduled but its slot has not ended yet.';
-    else if(autoAbsent) note='This Absent was applied automatically because the scheduled period ended without a mark.';
+    else if(notMarked) note='This period is scheduled but its slot has not started yet.';
+    else if(unmarked) note='This period is unmarked ("-"). It is excluded from totals until staff records an explicit status.';
+    else if(status==='N') note='N is an absence and is counted as absent in percentages and reports.';
     $('logBody').innerHTML = `
       <div class="mb-2"><span class="badge ${badge}">${esc(status||'N/A')}</span></div>
       <table class="table table-sm small mb-0">

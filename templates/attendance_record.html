@@ -38,7 +38,7 @@
           {% for r in session_rows or [] %}
             <tr>
               <td>{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td><td>{{ r[3] }}</td><td>{{ rep_badge(session_roles.get(r[10])) }}{{ r[4] }}</td><td>{{ r[5] or '-' }}</td>
-              <td>{% if r[6]=='Absent' %}<span class="badge bg-danger">Absent</span>{% elif r[6]=='OD' %}<span class="badge bg-primary">OD</span>{% elif r[6]=='Late' %}<span class="badge bg-warning text-dark">Late</span>{% else %}<span class="badge bg-success">{{ r[6] }}</span>{% endif %}</td>
+              <td>{% if r[6]=='Absent' %}<span class="badge bg-danger">Absent</span>{% elif r[6]=='N' %}<span class="badge bg-dark">N</span>{% elif r[6]=='-' %}<span class="badge bg-secondary">-</span>{% elif r[6]=='OD' %}<span class="badge bg-primary">OD</span>{% elif r[6]=='Late' %}<span class="badge bg-warning text-dark">Late</span>{% else %}<span class="badge bg-success">{{ r[6] }}</span>{% endif %}</td>
               <td class="small">{{ r[7] or '-' }}</td><td class="small text-muted">{{ r[8] or '' }}</td><td class="small">{{ r[11] or '-' }}</td>
             </tr>
           {% else %}

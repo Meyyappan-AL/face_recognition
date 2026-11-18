@@ -122,6 +122,37 @@ def rep_badge(value):
 
 app.jinja_env.globals['rep_badge'] = rep_badge
 
+UNMARKED_STATUS = '-'
+ATTENDANCE_STATUSES = ('Present','Absent','OD','Late','N','Medical Leave',UNMARKED_STATUS)
+ATTENDANCE_COUNTED_STATUSES = ('Present','Absent','OD','Late','N','Medical Leave')
+ATTENDANCE_CREDITED_STATUSES = ('Present','Late','OD','Medical Leave')
+ATTENDANCE_ABSENCE_STATUSES = ('Absent','N')
+ATTENDANCE_STATUS_ALIASES = {
+    'P':'Present','PRESENT':'Present',
+    'A':'Absent','ABSENT':'Absent',
+    'OD':'OD','ON DUTY':'OD','ON-DUTY':'OD',
+    'L':'Late','LATE':'Late',
+    'N':'N',
+    'ML':'Medical Leave','MEDICAL':'Medical Leave','MEDICAL LEAVE':'Medical Leave',
+    '-':UNMARKED_STATUS,'UNMARKED':UNMARKED_STATUS,'NOT MARKED':UNMARKED_STATUS,'NOTMARKED':UNMARKED_STATUS,
+}
+ATTENDANCE_COUNTED_SQL = "('present','absent','od','late','n','medical leave')"
+ATTENDANCE_CREDITED_SQL = "('present','od','late','medical leave')"
+
+def _normalize_attendance_status(value, default=UNMARKED_STATUS):
+    key=_norm(value).upper()
+    if not key: return default
+    return ATTENDANCE_STATUS_ALIASES.get(key, default)
+
+def _is_attendance_counted(status):
+    return _normalize_attendance_status(status) in ATTENDANCE_COUNTED_STATUSES
+
+def _is_attendance_credited(status):
+    return _normalize_attendance_status(status) in ATTENDANCE_CREDITED_STATUSES
+
+def _is_attendance_absence(status):
+    return _normalize_attendance_status(status) in ATTENDANCE_ABSENCE_STATUSES
+
 def _normalize_dob(dob):
     dob = _norm(dob)
     if not dob: return ''
@@ -453,6 +484,13 @@ def init_db():
                     student_id INTEGER NOT NULL, alert_type TEXT, title TEXT, body TEXT,
                     source_ref TEXT, created_at TEXT, read_at TEXT
                 )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS staff_alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recipient_code TEXT, recipient_user_id INTEGER,
+                    title TEXT, body TEXT, source_ref TEXT,
+                    created_at TEXT, read_at TEXT
+                )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_staff_alerts_recipient ON staff_alerts(recipient_code, read_at, created_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS notification_outbox (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     alert_id INTEGER, student_id INTEGER, channel TEXT, recipient TEXT,
@@ -516,6 +554,9 @@ def init_db():
                     UNIQUE(job_id, face_key)
                 )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_face_faces_job ON face_attendance_faces(job_id)")
+    c.execute("UPDATE attendance_entries SET status='-' WHERE source='auto_absent' AND status='Absent'")
+    c.execute("UPDATE attendance_sessions SET staff_name='System (unmarked)', notes='Auto-created for unmarked period' WHERE source='auto_absent' AND staff_name='System (default absent)'")
+    c.execute("UPDATE app_settings SET value='22' WHERE key='attendance_cutoff_hour' AND value='18'")
     conn.commit(); conn.close()
     if not os.path.exists(TRAIN_STATUS_FILE): write_train_status({"running": False, "progress": 0, "message": "No training yet."})
 
@@ -558,7 +599,7 @@ def seed_defaults():
         'email_absent': '1', 'email_od': '1', 'email_low_attendance': '1',
         'sms_absent': '1', 'sms_od': '0', 'sms_low_attendance': '0',
         'push_absent': '1', 'push_od': '1', 'push_low_attendance': '1',
-        'attendance_cutoff_hour': '18'
+        'attendance_cutoff_hour': '22', 'attendance_start_hour': '6', 'attendance_window_days': '15'
     }
     for k, v in defaults.items():
         c.execute('INSERT OR IGNORE INTO app_settings (key,value,updated_at,updated_by) VALUES (?,?,?,?)', (k, v, now, 'system'))
@@ -999,12 +1040,15 @@ def admin_student_attendance(sid):
     details=[]
     total=credited=absent=0
     for r in rows:
-        st=r[4] or ''
-        key=st.strip().lower()
+        st=_normalize_attendance_status(r[4])
+        if st==UNMARKED_STATUS:
+            details.append({'date':r[0] or '','period':r[1] or '', 'subject':r[2] or '', 'class':r[3] or '',
+                            'status':st,'marked_by':r[5] or '','source':r[6] or '','updated_at':r[7] or '','submitted_at':r[8] or ''})
+            continue
         total+=1
-        if key in ('present','late','od','medical leave'):
+        if _is_attendance_credited(st):
             credited+=1
-        elif key in ('absent','n'):
+        elif _is_attendance_absence(st):
             absent+=1
         details.append({'date':r[0] or '','period':r[1] or '', 'subject':r[2] or '', 'class':r[3] or '',
                         'status':st,'marked_by':r[5] or '','source':r[6] or '','updated_at':r[7] or '','submitted_at':r[8] or ''})
@@ -1585,7 +1629,9 @@ def api_admin_timetable_reference_upload():
     ext=os.path.splitext(f.filename)[1].lower()
     if ext not in ALLOWED_TIMETABLE_REF_EXTENSIONS:
         return jsonify({'ok':False,'error':'Only PDF, JPG, PNG, or WEBP files are allowed.'}), 400
-    cls=_norm(request.form.get('class') or 'timetable')
+    cls=_norm(request.form.get('class'))
+    if cls not in get_classes():
+        return jsonify({'ok':False,'error':'Choose a valid class before uploading a reference.'}), 400
     safe=secure_filename(f.filename) or f'timetable{ext}'
     ts=datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     token=uuid.uuid4().hex[:8]
@@ -1759,10 +1805,21 @@ def _resolve_elective_version(class_name, version_id=None, semester_id=None):
         try: vid=int(version_id)
         except Exception: return None
         version=_elective_version(class_name,vid)
+        if not version: return None
+        if semester_id not in (None,''):
+            try: sid=int(semester_id)
+            except Exception: return None
+            if int(version.get('semester_id') or 0)!=sid: return None
         return version
     version=_timetable_version_row(class_name,_today_ist_str())
+    if semester_id not in (None,''):
+        try: sid=int(semester_id)
+        except Exception: return None
+        if version and int(version.get('semester_id') or 0)==sid: return version
+        rows=_timetable_version_rows(class_name,sid)
+        return rows[0] if rows else None
     if version: return version
-    rows=_timetable_version_rows(class_name,semester_id)
+    rows=_timetable_version_rows(class_name,None)
     return rows[0] if rows else None
 
 @app.route('/admin/electives')
@@ -2819,7 +2876,9 @@ def attendance_record():
     conn.close()
     by_day={}
     for r in session_rows:
-        by_day.setdefault((r[10],r[0]),[]).append(_analytics_status_key(r[6]))
+        st_key=_analytics_status_key(r[6])
+        if st_key=='unmarked': continue
+        by_day.setdefault((r[10],r[0]),[]).append(st_key)
     full_days=set(); partial_days=set(); absent_days=set()
     for day_key,statuses in by_day.items():
         absent_count=sum(1 for s in statuses if s=='absent')
@@ -2838,9 +2897,11 @@ def attendance_record():
     session_roles=_student_roles_map([r[10] for r in session_rows])
     agg={}
     for r in session_rows:
+        st=_analytics_status_key(r[6])
+        if st=='unmarked': continue
         key=(r[10],r[4],r[5],r[1])
         a=agg.setdefault(key,{'present':0,'absent':0,'total':0})
-        st=_analytics_status_key(r[6]); a['total']+=1
+        a['total']+=1
         if st=='absent': a['absent']+=1
         elif st in ('present','late','od','medical'): a['present']+=1
     report_rows=[]
@@ -2898,8 +2959,9 @@ def get_student_notifications():
         c.execute("SELECT s.date,s.period,s.subject_display,s.class_name,e.status,e.marked_by,e.updated_at,s.submitted_at FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id WHERE e.student_id=? ORDER BY s.date DESC, s.period DESC, e.updated_at DESC LIMIT 200", (student[0],))
         for r in c.fetchall():
             ts = r[6] or r[7] or (r[0]+'T00:00:00' if r[0] else '')
-            logs.append({'date':r[0],'period':r[1],'subject':r[2] or '','class':r[3] or '','status':r[4] or 'Absent','marked_by':r[5] or '', 'timestamp':ts,
-                         'label': f"P{r[1]} {r[2] or ''} - {r[4] or 'Absent'}", 'action': r[4] or 'Absent'})
+            status=_normalize_attendance_status(r[4])
+            logs.append({'date':r[0],'period':r[1],'subject':r[2] or '','class':r[3] or '','status':status,'marked_by':r[5] or '', 'timestamp':ts,
+                         'label': f"P{r[1]} {r[2] or ''} - {status}", 'action': status})
     except Exception: pass
     try:
         c.execute('SELECT student_name,action,timestamp FROM notifications WHERE student_id=? ORDER BY id DESC LIMIT 50',(student[0],))
@@ -2931,7 +2993,50 @@ def api_student_alert_read(alert_id):
 def api_student_alerts_read_all():
     student=_resolve_student_for_user()
     if not student: return jsonify({'ok':False,'error':'No linked student profile'}), 404
-    conn=_db(); c=conn.cursor(); c.execute('UPDATE student_alerts SET read_at=? WHERE student_id=? AND read_at IS NULL',(_now_iso(),student[0])); changed=c.rowcount; conn.commit(); conn.close()
+    conn=_db(); c=conn.cursor();     c.execute('UPDATE student_alerts SET read_at=? WHERE student_id=? AND read_at IS NULL',(_now_iso(),student[0])); changed=c.rowcount; conn.commit(); conn.close()
+    return jsonify({'ok':True,'marked':changed})
+
+def _staff_alert_access():
+    if session.get('role')=='admin':
+        return '', []
+    code=_upper(session.get('staff_code') or session.get('username'))
+    uid=session.get('user_id')
+    if not code and not uid: return '1=0', []
+    return "(upper(COALESCE(recipient_code,''))=upper(?) OR recipient_user_id=?)", [code, uid]
+
+@app.route('/api/staff/alerts', methods=['GET'])
+@app.route('/api/staff/unmarked_reminders', methods=['GET'])
+@staff_required
+def api_staff_alerts():
+    where, params=_staff_alert_access()
+    wh=(' WHERE '+where) if where else ''
+    conn=_db(); c=conn.cursor()
+    c.execute("""SELECT id,recipient_code,title,body,source_ref,created_at,read_at
+                 FROM staff_alerts"""+wh+" ORDER BY created_at DESC,id DESC LIMIT 100", params)
+    rows=c.fetchall(); conn.close()
+    alerts=[{'id':r[0],'recipient_code':r[1] or '', 'title':r[2] or '', 'body':r[3] or '',
+             'source_ref':r[4] or '', 'created_at':r[5] or '', 'read':bool(r[6])} for r in rows]
+    return jsonify({'ok':True,'alerts':alerts,'unread':sum(1 for a in alerts if not a['read'])})
+
+@app.route('/api/staff/alerts/<int:alert_id>/read', methods=['POST'])
+@staff_required
+def api_staff_alert_read(alert_id):
+    where, params=_staff_alert_access()
+    wh=(' AND '+where) if where else ''
+    conn=_db(); c=conn.cursor()
+    c.execute("""UPDATE staff_alerts SET read_at=COALESCE(read_at,?)
+                 WHERE id=?"""+wh, [_now_iso(),alert_id]+params)
+    changed=c.rowcount; conn.commit(); conn.close()
+    return jsonify({'ok':True,'marked':changed})
+
+@app.route('/api/staff/alerts/read_all', methods=['POST'])
+@staff_required
+def api_staff_alerts_read_all():
+    where, params=_staff_alert_access()
+    wh=(' AND '+where) if where else ''
+    conn=_db(); c=conn.cursor()
+    c.execute("UPDATE staff_alerts SET read_at=? WHERE read_at IS NULL"+wh, [_now_iso()]+params)
+    changed=c.rowcount; conn.commit(); conn.close()
     return jsonify({'ok':True,'marked':changed})
 
 @app.route('/student_summary', methods=['GET'])
@@ -2944,11 +3049,15 @@ def student_summary():
     try:
         c.execute("SELECT s.date,e.status,e.updated_at FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id WHERE e.student_id=?", (student[0],))
         for date,st,upd in c.fetchall():
+            stn=_normalize_attendance_status(st)
+            if stn==UNMARKED_STATUS:
+                if upd and (not last_ts or upd>last_ts): last_ts=upd
+                continue
             total += 1
-            stn=(st or '').title()
-            if stn in ('Present','Late'): present += 1; days.add(date)
-            elif stn=='OD': od += 1; present += 1; days.add(date)
-            elif stn=='Absent': absent += 1
+            if _is_attendance_credited(stn):
+                present += 1; days.add(date)
+                if stn=='OD': od += 1
+            elif _is_attendance_absence(stn): absent += 1
             if upd and (not last_ts or upd>last_ts): last_ts=upd
     except Exception:
         try:
@@ -2973,8 +3082,8 @@ def get_notifications():
 @app.route('/manual_attendance', methods=['POST'])
 @staff_required
 def manual_attendance():
-    data=request.get_json(silent=True) or {}; sid=data.get('student_id'); status=(data.get('status') or '').strip().title(); date_str=(data.get('date') or '').strip() or datetime.date.today().isoformat()
-    if status not in ('Present','Absent'): return jsonify({'ok':False,'error':'status must be Present or Absent'}), 400
+    data=request.get_json(silent=True) or {}; sid=data.get('student_id'); status=_normalize_attendance_status(data.get('status')); date_str=(data.get('date') or '').strip() or datetime.date.today().isoformat()
+    if status not in ATTENDANCE_COUNTED_STATUSES: return jsonify({'ok':False,'error':'status must be a marked attendance status'}), 400
     try: sid=int(sid); datetime.date.fromisoformat(date_str)
     except Exception: return jsonify({'ok':False,'error':'Invalid student_id/date'}), 400
     ok_win, win_reason = attendance_edit_allowed(date_str)
@@ -3136,7 +3245,7 @@ def api_attendance_roster():
     existing={}
     if sess_id:
         c.execute('SELECT student_id,status,source,elective_label FROM attendance_entries WHERE session_id=?',(sess_id,))
-        for r in c.fetchall(): existing[int(r[0])]={'status':(r[1] or 'Absent'),'source':r[2] or '','elective_label':r[3] or ''}
+        for r in c.fetchall(): existing[int(r[0])]={'status':_normalize_attendance_status(r[1]),'source':r[2] or '','elective_label':r[3] or ''}
     # approved OD records for this class/date/period
     approved_od=set()
     try:
@@ -3155,12 +3264,12 @@ def api_attendance_roster():
     students=[]
     for r in rows:
         sid=int(r[0]); ex=existing.get(sid) or {}
-        st=ex.get('status') or 'Absent'
+        st=_normalize_attendance_status(ex.get('status'))
         od_approved = (sid in approved_od) or (st=='OD' and ex.get('source')=='od_workflow')
         if od_approved: st='OD'
         medical_approved = (sid in approved_medical) or (st=='Medical Leave' and ex.get('source')=='medical_workflow')
         if medical_approved: st='Medical Leave'
-        locked_absent = (st=='Absent') and (not edit_allowed)
+        locked_absent = (st != UNMARKED_STATUS) and (not edit_allowed)
         locked_od = od_approved and (session.get('role')!='admin') and not session.get('is_hod')
         locked_medical = medical_approved and (session.get('role')!='admin') and not session.get('is_hod')
         elective=(ex.get('elective_label') or _effective_subject(emaps,sid,cls,date,period,'')) if cell.get('options') else ''
@@ -3170,12 +3279,16 @@ def api_attendance_roster():
                          'student_role':(r[11] if len(r)>11 else '') or '',
                          'photo_url':f'/student_photo_safe/{r[0]}' if _student_photo_path(r[0]) else None,
                          'selected_elective':elective,'effective_subject':elective or disp,
-                         'default_status':'Absent','status':st,'locked_absent':locked_absent,'locked_od':locked_od,'od_approved':od_approved,
-                         'locked_medical':locked_medical,'medical_approved':medical_approved,
-                         'edit_allowed':edit_allowed,'edit_reason':edit_reason,'session_id':sess_id})
+                          'default_status':UNMARKED_STATUS,'status':st,'unmarked':st==UNMARKED_STATUS,
+                          'locked_absent':locked_absent,'locked_od':locked_od,'od_approved':od_approved,
+                          'locked_medical':locked_medical,'medical_approved':medical_approved,
+                          'edit_allowed':edit_allowed,'edit_reason':edit_reason,'session_id':sess_id})
+    start_hour, window_days, end_hour = _attendance_window_settings()
+    end_date = datetime.date.fromisoformat(date) + datetime.timedelta(days=window_days - 1)
     return jsonify({'ok':True,'class':cls,'date':date,'period':int(period),'day':_day_key(date),'cell':cell,'students':students,
                     'session_id':sess_id,'is_subject_staff':is_subject,'edit_allowed':edit_allowed,'edit_reason':edit_reason,
-                     'note':'Default Absent. Staff may change marks on the same IST date before the cutoff; HOD/Admin may correct after cutoff until the semester end date. Future attendance is not editable. Approved Day OD (Advisor+HOD) applies date-by-date at/after 06:00 IST. Approved Medical Leave is credited and locked for staff.'})
+                    'status_options':list(ATTENDANCE_STATUSES),
+                    'note':f"Unmarked periods show '-' from {start_hour:02d}:00 IST on the class date. Staff may mark until {end_hour:02d}:00 IST on day {window_days} ({end_date.isoformat()}); HOD/Admin may correct until the semester end date. Future attendance is closed. Approved OD applies date-by-date at/after 06:00 IST. Approved Medical Leave is credited and locked for staff."})
 
 @app.route('/api/attendance/submit', methods=['POST'])
 @staff_required
@@ -3225,9 +3338,8 @@ def api_attendance_submit():
     emaps=_elective_lookup() if cell.get('options') else {}
     for m in marks:
         try:
-            stid=int(m.get('student_id')); status=(m.get('status') or 'Absent').strip().upper()
-            status={'PRESENT':'Present','ABSENT':'Absent','OD':'OD','LATE':'Late','MEDICAL LEAVE':'Medical Leave'}.get(status,'Absent')
-            c.execute('SELECT status,source FROM attendance_entries WHERE session_id=? AND student_id=?',(sess,stid)); prev=c.fetchone(); prev_st=(prev[0] if prev else None); prev_src=(prev[1] if prev else None)
+            stid=int(m.get('student_id')); status=_normalize_attendance_status(m.get('status'))
+            c.execute('SELECT status,source FROM attendance_entries WHERE session_id=? AND student_id=?',(sess,stid)); prev=c.fetchone(); prev_st=_normalize_attendance_status(prev[0] if prev else None); prev_src=(prev[1] if prev else None)
             od_approved = (stid in approved_od) or (prev_st=='OD' and prev_src=='od_workflow')
             if od_approved and not can_override_od:
                 if status!='OD': blocked += 1; details.append({'student_id':stid,'blocked':'Approved Day OD (Advisor+HOD) ? only HOD/Admin can change'})
@@ -3240,18 +3352,16 @@ def api_attendance_submit():
                 continue
             c.execute('SELECT reg_no,name FROM students WHERE id=?',(stid,)); sr=c.fetchone(); reg=sr[0] if sr else ''; sname=sr[1] if sr else (m.get('name') or '')
             face_mark = is_admin and (m.get('source') or '').strip()=='face_attendance' and status!='Medical Leave'
-            src='medical_workflow' if status=='Medical Leave' else ('face_attendance' if face_mark else 'manual')
+            src=('unmarked' if status==UNMARKED_STATUS else 'medical_workflow' if status=='Medical Leave' else ('face_attendance' if face_mark else 'manual'))
             try: conf = max(0.0, min(1.0, float(m.get('confidence')))) if face_mark and m.get('confidence') is not None else None
             except Exception: conf = None
             flagged = 1 if face_mark and m.get('flagged') else 0
             elabel=_effective_subject(emaps,stid,cls,date,period,'',version_id) if cell.get('options') else ''
             c.execute("INSERT INTO attendance_entries (session_id,student_id,reg_no,student_name,status,confidence,flagged,source,marked_by,updated_at,elective_label) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,student_id) DO UPDATE SET reg_no=excluded.reg_no,student_name=excluded.student_name,status=excluded.status,confidence=excluded.confidence,flagged=excluded.flagged,source=excluded.source,marked_by=excluded.marked_by,updated_at=excluded.updated_at,elective_label=COALESCE(NULLIF(excluded.elective_label,''),attendance_entries.elective_label)",
                       (sess,stid,reg,sname,status,conf,flagged,src,marked_by,now,elabel))
-            # Phase C: in-app Absent notification on submit (per period). Dedup unchanged (A->A no new notify).
-            # Re-notify on A->P->A: transition-based => notify when moving to Absent from non-Absent.
-            if status == 'Absent' and prev_st != 'Absent':
+            if _is_attendance_absence(status) and not _is_attendance_absence(prev_st):
                 try:
-                    action = f"Absent: {cls} {date} P{period} {disp}".strip()
+                    action = f"{status}: {cls} {date} P{period} {disp}".strip()
                     c.execute('INSERT INTO notifications (student_id,student_name,action,timestamp,source,marked_by) VALUES (?,?,?,?,?,?)',
                               (stid, sname or 'Student', action, now, f'{session_source}_submit', marked_by))
                     absent_alerts.append((stid, sname or 'Student', action))
@@ -3292,6 +3402,8 @@ ERP_DEFAULTS = {
     'semester_end': '',
     'defaulter_threshold': '75',
     'enforce_calendar_holidays': '0',  # 0=warn only, 1=block non-admin/HOD submit on holiday
+    'attendance_start_hour': '6',
+    'attendance_window_days': '15',
 }
 def get_setting(key, default=None):
     try:
@@ -3542,7 +3654,8 @@ def _last_alert_within(student_id, alert_type, days=7):
 
 def _attendance_percentage(student_id):
     conn=_db(); c=conn.cursor()
-    c.execute("""SELECT COUNT(*), SUM(CASE WHEN LOWER(status) IN ('present','od','late','medical leave') THEN 1 ELSE 0 END)
+    c.execute("""SELECT SUM(CASE WHEN LOWER(status) IN """+ATTENDANCE_COUNTED_SQL+""" THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN LOWER(status) IN """+ATTENDANCE_CREDITED_SQL+""" THEN 1 ELSE 0 END)
                  FROM attendance_entries WHERE student_id=?""", (student_id,))
     total, present = c.fetchone(); conn.close()
     total = int(total or 0); present = int(present or 0)
@@ -3574,9 +3687,18 @@ def _calendar_block_submit(class_name, date_str):
 
 # --- Time (IST) and attendance edit window (Phase A) ---
 IST_TZ = ZoneInfo('Asia/Kolkata') if ZoneInfo else None
-ATTENDANCE_CUTOFF_HOUR = 18  # 18:00:00 IST; staff edits allowed only before this
-OD_APPLY_HOUR = 6  # approved OD applies date-by-date at/after 06:00 IST
-ABSENCE_WORKER_INTERVAL = 60  # seconds between default-absent/OD materialization passes
+ATTENDANCE_CUTOFF_HOUR = 22
+OD_APPLY_HOUR = 6
+ABSENCE_WORKER_INTERVAL = 60
+
+def _setting_int(key, default, low, high):
+    try: return max(low, min(high, int(float(get_setting(key, default)))))
+    except Exception: return default
+
+def _attendance_window_settings():
+    return (_setting_int('attendance_start_hour', 6, 0, 23),
+            _setting_int('attendance_window_days', 15, 1, 60),
+            _setting_int('attendance_cutoff_hour', ATTENDANCE_CUTOFF_HOUR, 0, 23))
 
 def _now_ist():
     # IST = UTC+05:30 (fallback if zoneinfo unavailable)
@@ -3603,31 +3725,34 @@ def inject_erp_context():
         },
     }
 
-def attendance_edit_allowed(attendance_date_str):
-    """Phase C: no future attendance writes. Staff edit same-day before cutoff. HOD/Admin may correct after cutoff
-    only until the semester end date. After the semester ends, all manual attendance changes are closed."""
-    try:
-        att_d = datetime.date.fromisoformat((attendance_date_str or '').strip())
-    except Exception:
-        return False, 'Invalid attendance date.'
-    now = _now_ist()
+def _attendance_window_status(att_d, now=None, is_override=False):
+    now = now or _now_ist()
     today = now.date()
     if att_d > today:
         return False, 'Future attendance cannot be marked or changed.'
     _sem, sem_end = _semester_end_for_date(att_d.isoformat())
     if sem_end and att_d > sem_end:
         return False, f'Semester ended on {sem_end.isoformat()}; attendance changes are closed.'
-    if _is_admin_or_hod():
+    if is_override:
         until = f' until semester end {sem_end.isoformat()}' if sem_end else ''
         return True, f'Admin/HOD override{until}'
-    if att_d != today:
-        return False, f'Staff can mark/change attendance only on the same day (IST). Attendance date {att_d.isoformat()} cannot be submitted/changed on {today.isoformat()}. HOD/Admin may correct until the semester end date.'
-    try: cutoff_hour = max(0, min(23, int(get_setting('attendance_cutoff_hour', ATTENDANCE_CUTOFF_HOUR))))
-    except Exception: cutoff_hour = ATTENDANCE_CUTOFF_HOUR
-    cutoff = now.replace(hour=cutoff_hour, minute=0, second=0, microsecond=0)
-    if now >= cutoff:
-        return False, f'Manual attendance edit window closed: staff can mark/change only before {cutoff_hour:02d}:00 IST on the same day. HOD/Admin may correct until the semester end date.'
-    return True, f'Allowed (same day, before {cutoff_hour:02d}:00 IST)'
+    start_hour, window_days, end_hour = _attendance_window_settings()
+    tz = now.tzinfo
+    start = datetime.datetime.combine(att_d, datetime.time(start_hour, 0, 0)).replace(tzinfo=tz)
+    end_date = att_d + datetime.timedelta(days=window_days - 1)
+    end = datetime.datetime.combine(end_date, datetime.time(end_hour, 0, 0)).replace(tzinfo=tz)
+    if now < start:
+        return False, f'Staff edit window opens at {start_hour:02d}:00 IST on {att_d.isoformat()}.'
+    if now > end:
+        return False, f'Staff edit window closed at {end_hour:02d}:00 IST on {end_date.isoformat()}. HOD/Admin may correct until the semester end date.'
+    return True, f'Allowed (until {end_hour:02d}:00 IST on {end_date.isoformat()})'
+
+def attendance_edit_allowed(attendance_date_str):
+    try:
+        att_d = datetime.date.fromisoformat((attendance_date_str or '').strip())
+    except Exception:
+        return False, 'Invalid attendance date.'
+    return _attendance_window_status(att_d, is_override=_is_admin_or_hod())
 
 # --- Academic calendar (admin) and student dashboard APIs ---
 def _parse_iso_date(d):
@@ -3800,14 +3925,23 @@ def _period_ended(date_str, period, tt, now_ist):
     end=_slot_end_time(tt, period)
     return bool(end and now_ist.time()>=end)
 
+def _unmarked_placeholder_due(date_str, now_ist):
+    d=_parse_iso_date(date_str)
+    if not d: return False
+    today=now_ist.date()
+    if d<today: return True
+    if d>today: return False
+    start_hour, _days, _end_hour = _attendance_window_settings()
+    return now_ist.hour >= start_hour
+
 def _active_students_for_class(conn, class_name):
     c=conn.cursor()
     c.execute('SELECT id,reg_no,name FROM students WHERE upper(class)=upper(?) AND (active IS NULL OR active=1) ORDER BY roll, reg_no, name',(class_name,))
     return c.fetchall()
 
 def _materialize_default_absent(class_name=None, date_from=None, date_to=None, conn=None, semester=None):
-    """Persist default Absent rows for timetable periods that have ended and have no entry yet.
-    Idempotent: existing Present/Late/OD/manual marks are never overwritten."""
+    """Persist unmarked '-' rows for timetable periods with no explicit entry yet.
+    Idempotent: existing Present/Late/OD/N/manual marks are never overwritten."""
     own = conn is None
     if own: conn = _db()
     now = _now_ist(); today = now.date(); now_iso = datetime.datetime.utcnow().isoformat()
@@ -3847,7 +3981,7 @@ def _materialize_default_absent(class_name=None, date_from=None, date_to=None, c
                     try: per = int(cell.get('period') or 0)
                     except Exception: continue
                     if per < 1 or per > 7: continue
-                    if not _period_ended(ds, per, day_tt, now): continue
+                    if not _unmarked_placeholder_due(ds, now): continue
                     duration = _slot_duration_minutes(day_tt, per)
                     disp = (cell.get('display') or cell.get('subject') or f'P{per}').strip()
                     subj = (cell.get('subject') or disp).strip()
@@ -3858,16 +3992,123 @@ def _materialize_default_absent(class_name=None, date_from=None, date_to=None, c
                         c.execute('UPDATE attendance_sessions SET timetable_version_id=COALESCE(timetable_version_id,?), duration_minutes=COALESCE(duration_minutes,?) WHERE id=?',(day_version_id,duration,sess))
                     else:
                         c.execute('INSERT INTO attendance_sessions (class_name,date,period,subject,subject_display,staff_code,staff_name,status,source,created_at,submitted_at,notes,timetable_version_id,duration_minutes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                                  (cls,ds,per,subj,disp,'SYSTEM','System (default absent)','submitted','auto_absent',now_iso,now_iso,'Auto-created for default Absent',day_version_id,duration))
+                                  (cls,ds,per,subj,disp,'SYSTEM','System (unmarked)','submitted','auto_absent',now_iso,now_iso,'Auto-created for unmarked period',day_version_id,duration))
                         sess = c.lastrowid; stats['sessions_created'] += 1
                     before = conn.total_changes
                     c.executemany('INSERT INTO attendance_entries (session_id,student_id,reg_no,student_name,status,confidence,flagged,source,marked_by,updated_at,elective_label) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,student_id) DO NOTHING',
-                                  [(sess,sid,reg or '',name or '','Absent',None,0,'auto_absent','system',now_iso,
+                                  [(sess,sid,reg or '',name or '',UNMARKED_STATUS,None,0,'auto_absent','system',now_iso,
                                     _effective_subject(emaps,sid,cls,ds,per,'',day_version_id) if cell.get('options') else '') for sid,reg,name in students])
                     stats['entries_created'] += conn.total_changes - before
                 if own: conn.commit()
                 cur += datetime.timedelta(days=1)
             stats['classes'] += 1
+    except Exception:
+        if own: conn.rollback()
+        raise
+    finally:
+        if own: conn.close()
+    return stats
+
+def _timetable_cell_for_slot(tt, date_str, period, display=None):
+    cells=((tt or {}).get('schedule') or {}).get(_day_key(date_str)) or []
+    wanted=int(period or 0); wanted_display=_norm(display)
+    fallback=None
+    for cell in cells:
+        try: per=int(cell.get('period') or 0)
+        except Exception: continue
+        if per!=wanted: continue
+        fallback=fallback or cell
+        cell_display=_norm(cell.get('display') or cell.get('subject') or '')
+        if not wanted_display or cell_display==wanted_display: return cell
+    return fallback
+
+def _slot_time_text(tt, period):
+    for s in (tt or {}).get('slots') or []:
+        try:
+            if int(s.get('period') or 0)!=int(period or 0): continue
+            start=(s.get('start') or '').strip()[:5]; end=(s.get('end') or '').strip()[:5]
+            if start or end: return f'{start or "?"}-{end or "?"}'
+        except Exception:
+            continue
+    return ''
+
+def _staff_alert_recipients(conn, tt, cls, cell):
+    c=conn.cursor()
+    directory={_upper(k):_norm(v) for k,v in ((tt or {}).get('staff_directory') or {}).items()}
+    recipients=[]; seen=set()
+    def add(code, name=''):
+        code=_upper(code)
+        if not code or code in seen: return
+        seen.add(code)
+        display=_norm(name) or directory.get(code) or code
+        c.execute('SELECT id,display_name FROM users WHERE upper(COALESCE(staff_code,username))=upper(?) AND COALESCE(active,1)=1 ORDER BY id LIMIT 1',(code,))
+        u=c.fetchone()
+        if u:
+            display=_norm(u[1]) or display
+        recipients.append({'code':code,'name':display,'user_id':int(u[0]) if u else None})
+    for code in ((cell or {}).get('staff') or []):
+        add(code, directory.get(_upper(code), ''))
+    if not recipients:
+        adv=(tt or {}).get('class_advisor') or {}
+        add(adv.get('initials'), adv.get('name'))
+    if not recipients:
+        c.execute("""SELECT staff_code,display_name FROM users
+                     WHERE upper(COALESCE(advisor_class,''))=upper(?) AND COALESCE(active,1)=1
+                       AND COALESCE(staff_code,username) IS NOT NULL
+                     ORDER BY id LIMIT 1""",(cls,))
+        u=c.fetchone()
+        if u: add(u[0], u[1])
+    return recipients or [{'code':'UNASSIGNED','name':'Unassigned (admin visibility)','user_id':None}]
+
+def _generate_unmarked_staff_alerts(conn=None):
+    """Create daily staff digests for still-unmarked past periods while staff can mark them."""
+    own = conn is None
+    if own: conn=_db()
+    c=conn.cursor(); now=_now_ist(); today=now.date().isoformat()
+    stats={'digests':0,'inserted':0,'updated':0,'removed':0}
+    try:
+        c.execute("""SELECT s.id,s.class_name,s.date,s.period,s.subject_display,COUNT(e.id)
+                     FROM attendance_sessions s JOIN attendance_entries e ON e.session_id=s.id
+                     WHERE LOWER(COALESCE(e.status,''))=? AND s.date<?
+                     GROUP BY s.id ORDER BY s.date DESC,s.class_name,s.period""",(UNMARKED_STATUS,today))
+        pending=c.fetchall(); digests={}
+        for sess,cls,ds,period,subject,count in pending:
+            att_d=_parse_iso_date(ds)
+            if not att_d: continue
+            allowed,_reason=_attendance_window_status(att_d, now=now)
+            if not allowed: continue
+            tt=load_timetable(cls,ds) or {}
+            cell=_timetable_cell_for_slot(tt,ds,period,subject)
+            slot=_slot_time_text(tt,period)
+            label=f'{ds} | P{period} | {cls} | {_norm(subject) or "Period " + str(period)}'
+            if slot: label += f' | {slot}'
+            label += f' | {int(count or 0)} unmarked student(s)'
+            for rec in _staff_alert_recipients(conn,tt,cls,cell):
+                key=(rec['code'],ds)
+                d=digests.setdefault(key,{'recipient':rec,'date':ds,'lines':[]})
+                if label not in d['lines']: d['lines'].append(label)
+        active_refs=set()
+        for (code,ds),d in sorted(digests.items(), key=lambda kv:(kv[0][0],kv[0][1])):
+            rec=d['recipient']; source_ref=f'unmarked_digest:{code}:{ds}'
+            active_refs.add(source_ref)
+            title=('Unassigned unmarked attendance' if code=='UNASSIGNED' else 'Unmarked attendance reminder')+f' - {ds}'
+            body='\n'.join(d['lines'])
+            existing=c.execute('SELECT id,body FROM staff_alerts WHERE source_ref=? ORDER BY id DESC LIMIT 1',(source_ref,)).fetchone()
+            if existing:
+                if (existing[1] or '')!=body:
+                    c.execute('UPDATE staff_alerts SET title=?,body=?,read_at=NULL WHERE id=?',(title,body,existing[0]))
+                    stats['updated']+=1
+            else:
+                c.execute("""INSERT INTO staff_alerts(recipient_code,recipient_user_id,title,body,source_ref,created_at)
+                             VALUES (?,?,?,?,?,?)""",(code,rec.get('user_id'),title,body,source_ref,_now_iso()))
+                stats['inserted']+=1
+            stats['digests']+=1
+        rows=c.execute("SELECT id,source_ref FROM staff_alerts WHERE source_ref LIKE 'unmarked_digest:%'").fetchall()
+        stale=[int(r[0]) for r in rows if r[1] not in active_refs]
+        for alert_id in stale:
+            c.execute('DELETE FROM staff_alerts WHERE id=?',(alert_id,))
+        stats['removed']=len(stale)
+        if own: conn.commit()
     except Exception:
         if own: conn.rollback()
         raise
@@ -3885,6 +4126,7 @@ def _absence_worker_loop():
             else:
                 today = _now_ist().date().isoformat()
                 _materialize_default_absent(date_from=today, date_to=today)
+            _generate_unmarked_staff_alerts()
             _apply_due_approved_od()
             _apply_due_approved_medical()
         except Exception:
@@ -3993,8 +4235,12 @@ def api_admin_calendar_add():
     class_name=(request.form.get('class_name') or '').strip() or None
     notes=_norm(request.form.get('notes'))
     if not title or not date: return jsonify({'ok':False,'error':'Title and date are required'}), 400
-    if not _parse_iso_date(date): return jsonify({'ok':False,'error':'Invalid date'}), 400
-    if end_date and not _parse_iso_date(end_date): end_date=None
+    start_date=_parse_iso_date(date)
+    if not start_date: return jsonify({'ok':False,'error':'Invalid date'}), 400
+    if end_date:
+        parsed_end=_parse_iso_date(end_date)
+        if not parsed_end: return jsonify({'ok':False,'error':'Invalid end date'}), 400
+        if parsed_end<start_date: return jsonify({'ok':False,'error':'End date cannot be before the start date'}), 400
     now=datetime.datetime.utcnow().isoformat(); who=_current_user().get('display_name') or session.get('username')
     conn=_db(); c=conn.cursor()
     c.execute('INSERT INTO academic_calendar (title,date,end_date,type,affects_attendance,class_name,notes,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
@@ -4067,7 +4313,7 @@ def api_student_dashboard():
     for r in rows:
         (date, period, subj, subj_disp, cls, submitted_at, sess_src, sess_id,
          status, esrc, marked_by, updated_at, confidence, flagged, eid, entry_label)=r
-        stt=(status or '').strip()
+        stt=_normalize_attendance_status(status)
         try: pd=int(period or 0)
         except Exception: pd=0
         esource=(esrc or sess_src or 'manual')
@@ -4077,8 +4323,8 @@ def api_student_dashboard():
                'source':esource,'session_source':sess_src or '',
                'marked_by':marked_by or '','updated_at':updated_at or submitted_at or '',
                'submitted_at':submitted_at or '','confidence':confidence,'flagged':int(flagged or 0),
-               'scheduled':True,'default_absent':esource=='auto_absent',
-               'method_label':('Default absent (unmarked period ended)' if esource=='auto_absent' else ('Medical leave workflow (Advisor+HOD approved)' if esource=='medical_workflow' else ('OD workflow (Advisor+HOD approved)' if esource=='od_workflow' else 'Staff period submission (manual)'))),
+               'scheduled':True,'default_absent':esource=='auto_absent','unmarked':stt==UNMARKED_STATUS,
+               'method_label':('Unmarked period (no explicit mark)' if stt==UNMARKED_STATUS else ('Medical leave workflow (Advisor+HOD approved)' if esource=='medical_workflow' else ('OD workflow (Advisor+HOD approved)' if esource=='od_workflow' else 'Staff period submission (manual)'))),
                'confidence_label':(f"{round(float(confidence)*100,1)}%" if confidence is not None else '')}
         mapped=(entry_label or '').strip() or _effective_subject(emaps,student[0],cls or class_name,date,pd,emap.get(f"{_day_key(date)}-P{pd}") or '')
         if mapped:
@@ -4120,52 +4366,52 @@ def api_student_dashboard():
                 if not c2.get('class_name'): c2['class_name']=class_name
                 c2.setdefault('slot', f"{((cel or {}).get('start') or '')}-{((cel or {}).get('end') or '')}".strip('-'))
                 obj['periods'][str(p)]=c2; obj['scheduled_periods']+=1
-                if c2.get('status') in ('Present','Late','OD','Medical Leave'): days_present.add(ds)
-                if c2.get('status')=='Absent': absent_items.append({'date':ds,'period':p,'subject':c2.get('subject_display') or '', 'status':'Absent','marked_by':c2.get('marked_by') or '','source':c2.get('source') or '','default_absent':(c2.get('source')=='auto_absent')})
+                if _is_attendance_credited(c2.get('status')): days_present.add(ds)
+                if _is_attendance_absence(c2.get('status')): absent_items.append({'date':ds,'period':p,'subject':c2.get('subject_display') or '', 'status':c2.get('status'),'marked_by':c2.get('marked_by') or '','source':c2.get('source') or '','default_absent':(c2.get('source')=='auto_absent')})
             elif cel:
-                ended=_period_ended(ds,p,day_tt,now_ist)
-                stt='Absent' if ended else 'Not Marked'
+                due=_unmarked_placeholder_due(ds,now_ist)
+                stt=UNMARKED_STATUS if due else 'Not Marked'
                 item={'date':ds,'period':p,'status':stt,'scheduled':True,'class_name':class_name,
                       'subject':cel.get('subject') or '','subject_display':cel.get('display') or cel.get('subject') or f'P{p}',
-                      'source':'auto_absent' if ended else None,'session_source':'','marked_by':'','updated_at':'','submitted_at':'',
+                      'source':'auto_absent' if due else None,'session_source':'','marked_by':'','updated_at':'','submitted_at':'',
                       'confidence':None,'confidence_label':'',
                       'slot':f"{cel.get('start') or ''}-{cel.get('end') or ''}".strip('-'),
-                      'method_label':('Default absent (unmarked period ended)' if ended else 'Not yet due'),
-                      'scheduled':True}
+                      'method_label':('Unmarked period (no explicit mark)' if due else 'Not yet due'),
+                      'unmarked':due,'scheduled':True}
                 obj['periods'][str(p)]=item; obj['scheduled_periods']+=1
-                if ended: absent_items.append({'date':ds,'period':p,'subject':item['subject_display'],'status':'Absent','marked_by':'','source':'auto_absent','default_absent':True})
             else:
                 obj['periods'][str(p)]={'date':ds,'period':p,'status':'NA','scheduled':False,'class_name':class_name}
         if obj['scheduled_periods']: grid.append(obj)
     grid.sort(key=lambda x:x['date'], reverse=True)
-    present_p2=late_p2=od_p2=medical_p2=absent_p2=auto_absent_p2=not_marked_p2=0; scheduled_periods=0
+    present_p2=late_p2=od_p2=medical_p2=absent_p2=n_p2=auto_absent_p2=unmarked_p2=not_marked_p2=0; scheduled_periods=0
     subject_stats={}
     for g in grid:
         for p in range(1,8):
             c2=g['periods'].get(str(p)) or {}
             if not c2.get('scheduled'): continue
             scheduled_periods+=1
-            stt=c2.get('status')
+            stt=_normalize_attendance_status(c2.get('status'))
             if stt=='Present': present_p2+=1
             elif stt=='Late': late_p2+=1
             elif stt=='OD': od_p2+=1
             elif stt=='Medical Leave': medical_p2+=1
-            elif stt=='Absent':
-                absent_p2+=1
+            elif stt=='N': n_p2+=1; absent_p2+=1
+            elif stt=='Absent': absent_p2+=1
+            elif stt==UNMARKED_STATUS:
+                unmarked_p2+=1; not_marked_p2+=1
                 if c2.get('source')=='auto_absent': auto_absent_p2+=1
             elif stt=='Not Marked': not_marked_p2+=1
-            if stt in ('Present','Late','OD','Medical Leave','Absent'):
+            if _is_attendance_counted(stt):
                 subject=(c2.get('subject_display') or c2.get('subject') or 'Unspecified').strip()
                 stat=subject_stats.setdefault(subject,{'subject':subject,'total':0,'credited':0,'present':0,'late':0,'od':0,'medical':0,'absent':0})
                 stat['total']+=1
-                if stt in ('Present','Late','OD','Medical Leave'):
-                    stat['credited']+=1
+                if _is_attendance_credited(stt): stat['credited']+=1
                 if stt=='Present': stat['present']+=1
                 elif stt=='Late': stat['late']+=1
                 elif stt=='OD': stat['od']+=1
                 elif stt=='Medical Leave': stat['medical']+=1
-                elif stt=='Absent': stat['absent']+=1
-    working_days=sum(1 for g in grid if any((g['periods'].get(str(p)) or {}).get('status') in ('Present','Absent','Late','OD','Medical Leave') for p in range(1,8)))
+                elif stt in ('Absent','N'): stat['absent']+=1
+    working_days=sum(1 for g in grid if any(_is_attendance_counted((g['periods'].get(str(p)) or {}).get('status')) for p in range(1,8)))
     days_present_n=len(days_present); days_absent=max(0, working_days-days_present_n)
     total_marked=present_p2+late_p2+od_p2+medical_p2+absent_p2; attended=present_p2+late_p2+od_p2+medical_p2
     pct=round((attended/total_marked*100),2) if total_marked else 0.0
@@ -4206,9 +4452,10 @@ def api_student_dashboard():
               'is_current':sem_meta['is_current'],'from':sem_meta['from'],'to':sem_meta['to'],
               'working_days':working_days,'days_present':days_present_n,'days_absent':days_absent,
               'scheduled_periods':scheduled_periods,'total_periods_marked':total_marked,'not_marked_periods':not_marked_p2,
-              'present_periods':present_p2,'late_periods':late_p2,'od_periods':od_p2,'medical_periods':medical_p2,
-              'absent_periods':absent_p2,'auto_absent_periods':auto_absent_p2,'attendance_percentage':pct,
-              'threshold':threshold,'can_miss':can_miss}
+               'present_periods':present_p2,'late_periods':late_p2,'od_periods':od_p2,'medical_periods':medical_p2,
+               'absent_periods':absent_p2,'n_periods':n_p2,'unmarked_periods':unmarked_p2,
+               'auto_absent_periods':auto_absent_p2,'attendance_percentage':pct,
+               'threshold':threshold,'can_miss':can_miss}
     cal_up=[it for it in _calendar_items(class_name, today.isoformat(), (today+datetime.timedelta(days=60)).isoformat())][:20]
     try:
         tt=tt or {}
@@ -4224,7 +4471,7 @@ def api_student_dashboard():
                     'today_ist':today.isoformat(),
                     'advisor_contact':_advisor_contact_for_class(class_name),
                     'export_url':'/student/export_csv?'+urlencode(export_qs),
-                    'note':'Working days and percentages use the full scheduled grid. Medical Leave is credited like Present/Late/OD. Unmarked periods whose slot has ended count as default Absent; future periods stay Not Marked.'})
+                     'note':'Working days and percentages exclude unmarked "-" periods. N counts as an absence. Medical Leave is credited like Present/Late/OD. Future periods stay Not Marked.'})
 
 @app.route('/student/export_csv')
 @student_required
@@ -4361,9 +4608,7 @@ def _hod_cancel_od_allowed(to_date_str):
     return now <= end
 
 def _revert_cancelled_od(conn, req):
-    """Phase B: if HOD cancels OD, override OD effect back to normal: default Absent, Present only if face recognized or manual staff mark.
-    Safe reversal: remove od_records for this request; revert only od_workflow/OD-provenance entries to Absent.
-    Keep explicit Present marks not from this OD workflow."""
+    """Phase B: if HOD cancels OD, override OD effect back to unmarked '-'; keep explicit Present marks not from this OD workflow."""
     c = conn.cursor(); now = datetime.datetime.utcnow().isoformat()
     rid = req['id']; sid = req['student_id']
     periods = _parse_req_periods(req)
@@ -4392,8 +4637,8 @@ def _revert_cancelled_od(conn, req):
                 if st == 'Present' and src not in ('od_workflow', 'od_cancel_revert'):
                     continue
                 if st == 'OD' or src == 'od_workflow' or src == 'od_cancel_revert':
-                    c.execute("UPDATE attendance_entries SET status='Absent', source='od_cancel_revert', marked_by=?, updated_at=? WHERE id=?",
-                              ('HOD cancelled OD', now, eid))
+                    c.execute("UPDATE attendance_entries SET status=?, source='od_cancel_revert', marked_by=?, updated_at=? WHERE id=?",
+                              (UNMARKED_STATUS, 'HOD cancelled OD', now, eid))
                     reverted += 1
             except Exception:
                 pass
@@ -4922,8 +5167,8 @@ def _revert_cancelled_medical(conn, req):
                     continue
                 entry_id, status, source = row
                 if (status or '').strip() == 'Medical Leave' and (source or '').strip() == 'medical_workflow':
-                    c.execute("UPDATE attendance_entries SET status='Absent',source='medical_cancel_revert',marked_by=?,updated_at=? WHERE id=?",
-                              ('Medical leave cancelled', now, entry_id))
+                    c.execute("UPDATE attendance_entries SET status=?,source='medical_cancel_revert',marked_by=?,updated_at=? WHERE id=?",
+                              (UNMARKED_STATUS, 'Medical leave cancelled', now, entry_id))
                     reverted += 1
             except Exception:
                 pass
@@ -5401,14 +5646,16 @@ def api_admin_settings():
         sem=_current_semester() or {}
         groups=[
             {'title':'Academic & semester','description':'Mirrors the current semester. Use Semester Management for multiple semesters.','fields':['semester_label','semester_start','semester_end']},
-            {'title':'Attendance policy','description':'Controls defaulter reporting and the staff same-day marking cutoff.','fields':['defaulter_threshold','attendance_cutoff_hour']},
+            {'title':'Attendance policy','description':'Controls defaulter reporting and the staff marking window.','fields':['defaulter_threshold','attendance_start_hour','attendance_cutoff_hour','attendance_window_days']},
             {'title':'Calendar enforcement','description':'Choose whether calendar holidays block staff submissions.','fields':['enforce_calendar_holidays']},
         ]
         runtime={'today_ist':_today_ist_str(),'semester_label':sem.get('label') or vals.get('semester_label',''),
                  'semester_start':sem.get('start_date') or vals.get('semester_start',''),
                  'semester_end':sem.get('end_date') or vals.get('semester_end',''),
-                 'attendance_cutoff_hour':vals['attendance_cutoff_hour'],
-                 'hod_correction_note':'HOD/Admin may correct after cutoff until the semester end date; future dates stay closed.'}
+                  'attendance_start_hour':vals['attendance_start_hour'],
+                  'attendance_cutoff_hour':vals['attendance_cutoff_hour'],
+                  'attendance_window_days':vals['attendance_window_days'],
+                  'hod_correction_note':'HOD/Admin may correct until the semester end date; future dates stay closed.'}
         return jsonify({'ok':True,'settings':vals,'groups':groups,'runtime':runtime})
     data=request.get_json(silent=True) or request.form.to_dict()
     who=session.get('display_name') or session.get('username')
@@ -5436,6 +5683,14 @@ def api_admin_settings():
         try: v=str(max(0,min(23,int(float(data.get('attendance_cutoff_hour'))))))
         except Exception: v=str(ATTENDANCE_CUTOFF_HOUR)
         set_setting('attendance_cutoff_hour',v,who); changed['attendance_cutoff_hour']=v
+    if 'attendance_start_hour' in data:
+        try: v=str(max(0,min(23,int(float(data.get('attendance_start_hour'))))))
+        except Exception: v='6'
+        set_setting('attendance_start_hour',v,who); changed['attendance_start_hour']=v
+    if 'attendance_window_days' in data:
+        try: v=str(max(1,min(60,int(float(data.get('attendance_window_days'))))))
+        except Exception: v='15'
+        set_setting('attendance_window_days',v,who); changed['attendance_window_days']=v
     audit_log('app_settings','global','update',None,changed,details='Admin updated ERP settings')
     return jsonify({'ok':True,'settings':changed})
 
@@ -5590,13 +5845,15 @@ def api_analytics_overview():
     c.execute("SELECT e.student_id,e.student_name,e.reg_no,s.class_name,e.status,count(*) FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id"+wh+" GROUP BY e.student_id,s.class_name,e.status", params)
     agg={}
     for sid,name,reg,cn,st,cnt in c.fetchall():
+        stn=_normalize_attendance_status(st)
+        if stn==UNMARKED_STATUS: continue
         key=(sid,name,reg,cn); a=agg.setdefault(key,{'present':0,'absent':0,'od':0,'late':0,'medical':0,'total':0})
-        stn=(st or '').title(); a['total']+=cnt
+        a['total']+=cnt
         if stn=='Present': a['present']+=cnt
-        elif stn=='Absent': a['absent']+=cnt
+        elif stn in ('Absent','N'): a['absent']+=cnt
         elif stn=='OD': a['od']+=cnt
         elif stn=='Late': a['late']+=cnt
-        elif stn.startswith('Med'): a['medical']+=cnt
+        elif stn=='Medical Leave': a['medical']+=cnt
     students=[]
     for (sid,name,reg,cn),a in agg.items():
         credited=a['present']+a['od']+a['late']+a['medical']
@@ -5608,11 +5865,13 @@ def api_analytics_overview():
     c.execute("SELECT s.class_name,s.subject_display,s.date,s.period,e.student_id,e.status,e.elective_label FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id"+wh+" ORDER BY s.class_name,s.date,s.period", params)
     sub_agg={}
     for cn,subj,dt,pd,sid,st,entry_label in c.fetchall():
+        stn=_normalize_attendance_status(st)
+        if stn==UNMARKED_STATUS: continue
         label=(entry_label or '').strip() or _effective_subject(emaps,sid,cn,dt,pd,subj or '')
         key=(cn or '',label or '')
         x=sub_agg.setdefault(key,{'total':0,'credited':0})
         x['total']+=1
-        if (st or '').strip().lower() in ('present','od','late','medical','medical leave'): x['credited']+=1
+        if _is_attendance_credited(stn): x['credited']+=1
     subjects=[{'class':k[0],'subject':k[1], 'total':v['total'],'credited':v['credited'],
                'percentage':round((v['credited']/(v['total'] or 1))*100,2)} for k,v in sorted(sub_agg.items())]
     c.execute("SELECT s.date,s.class_name,count(DISTINCT s.period) FROM attendance_sessions s"+wh+" GROUP BY s.date,s.class_name ORDER BY s.date DESC LIMIT 60", params)
@@ -5625,20 +5884,21 @@ def api_analytics_overview():
     return jsonify({'ok':True,'students':students,'defaulters':defaulters,'subjects':subjects,'compliance':compliance,'threshold':threshold,'semester':semester})
 
 def _analytics_status_key(status):
-    s=(status or '').strip().lower()
-    if s.startswith('med'): return 'medical'
-    if s in ('present','p'): return 'present'
-    if s in ('absent','a'): return 'absent'
-    if s in ('late','l'): return 'late'
-    if s in ('od','on duty','on-duty'): return 'od'
+    normalized=_normalize_attendance_status(status)
+    if normalized==UNMARKED_STATUS: return 'unmarked'
+    if normalized=='Medical Leave': return 'medical'
+    if normalized in ('Present','Absent','Late','OD','N'): return 'absent' if normalized=='N' else normalized.lower()
     return 'other'
 
 def _analytics_blank():
-    return {'present':0,'absent':0,'late':0,'od':0,'medical':0,'other':0,
+    return {'present':0,'absent':0,'late':0,'od':0,'medical':0,'other':0,'unmarked':0,
             'total':0,'credited':0,'absent_minutes':0}
 
 def _analytics_add(bucket, item):
     key=item['status_key']
+    if key=='unmarked':
+        bucket['unmarked']+=1
+        return
     if key in ('present','absent','late','od','medical'): bucket[key]+=1
     else: bucket['other']+=1
     bucket['total']+=1
@@ -5704,6 +5964,7 @@ def api_analytics_insights():
                       'staff_name':(r[11] or '').strip(),'duration':dur,'source':r[13] or ''})
     by_day={}
     for it in items:
+        if it['status_key']=='unmarked': continue
         by_day.setdefault((it['student_id'],it['date']),[]).append(it['status_key'])
     full_days=set(); partial_days=set(); absent_days=set()
     for day_key,statuses in by_day.items():
@@ -5826,9 +6087,11 @@ def download_defaulters_csv():
     c.execute("SELECT e.student_id,e.student_name,e.reg_no,s.class_name,e.status,count(*) FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id"+wh+" GROUP BY e.student_id,s.class_name,e.status", params)
     agg={}
     for sid,name,reg,cn,st,cnt in c.fetchall():
-        a=agg.setdefault((sid,name,reg,cn),{'p':0,'a':0,'od':0,'l':0,'t':0}); a['t']+=cnt; stn=(st or '').title()
-        if stn=='Present': a['p']+=cnt
-        elif stn=='Absent': a['a']+=cnt
+        stn=_normalize_attendance_status(st)
+        if stn==UNMARKED_STATUS: continue
+        a=agg.setdefault((sid,name,reg,cn),{'p':0,'a':0,'od':0,'l':0,'t':0}); a['t']+=cnt
+        if stn in ('Present','Medical Leave'): a['p']+=cnt
+        elif stn in ('Absent','N'): a['a']+=cnt
         elif stn=='OD': a['od']+=cnt
         elif stn=='Late': a['l']+=cnt
     conn.close()

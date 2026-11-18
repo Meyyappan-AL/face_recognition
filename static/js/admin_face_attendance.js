@@ -38,7 +38,7 @@
   }
 
   function statusForStudent(sid) {
-    return draft[String(sid)] || { status: 'Absent', source: 'manual', confidence: null, flagged: 0 };
+    return draft[String(sid)] || { status: '-', source: 'manual', confidence: null, flagged: 0 };
   }
 
   function matchedFaces(job) {
@@ -50,10 +50,10 @@
     matchedFaces(activeJob).forEach((f) => { bySid[String(f.student_id)] = f; });
     roster.forEach((s) => {
       const key = String(s.id);
-      const d = draft[key] || (draft[key] = { status: s.status || 'Absent', source: 'manual', confidence: null, flagged: 0 });
+      const d = draft[key] || (draft[key] = { status: s.status || '-', source: 'manual', confidence: null, flagged: 0 });
       const f = bySid[key];
       if (reset) {
-        d.status = s.status || 'Absent';
+        d.status = s.status || '-';
         d.source = 'manual';
         d.confidence = null;
         d.flagged = 0;
@@ -63,13 +63,13 @@
         d.flagged = Number(f.flagged || 0);
         if (!touched.has(key)) {
           d.source = 'face_attendance';
-          if (['Absent', 'Not Marked', ''].includes(d.status)) d.status = 'Present';
+          if (['Absent', 'Not Marked', '-', ''].includes(d.status)) d.status = 'Present';
         }
       } else if (!reset && !touched.has(key) && d.source === 'face_attendance') {
         d.source = 'manual';
         d.confidence = null;
         d.flagged = 0;
-        d.status = s.status || 'Absent';
+        d.status = s.status || '-';
       }
     });
   }
@@ -168,7 +168,7 @@
       const f = bySid[String(s.id)];
       const flagged = d.flagged || (f && Number(f.flagged || 0));
       const conf = d.confidence != null ? Math.round(d.confidence * 100) : null;
-      const status = d.status || 'Absent';
+      const status = d.status || '-';
       const btn = (val, label, cls) => `<button type="button" class="btn btn-sm face-status-btn ${status === val ? cls : 'btn-outline-secondary'} faceStatusBtn" data-sid="${s.id}" data-status="${val}">${label}</button>`;
       const match = f
         ? `<span class="badge ${flagged ? 'bg-warning text-dark' : 'bg-success'}">${conf == null ? 'matched' : conf + '%'}</span>${flagged ? ' <span class="badge bg-warning text-dark">Review</span>' : ''}`
@@ -177,7 +177,7 @@
         <td><div class="fw-semibold">${erp.repBadge(s.student_role)}${esc(s.name)}</div><div class="small text-muted">${esc(s.reg_no || '')}</div></td>
         <td class="small">${esc(s.roll || '')}${s.roll ? ' / ' : ''}${esc(s.reg_no || '')}</td>
         <td>${match}</td>
-        <td class="text-nowrap">${btn('Present', 'P', 'btn-success')} ${btn('Absent', 'A', 'btn-danger')} ${btn('Late', 'L', 'btn-info')} ${btn('OD', 'OD', 'btn-primary')}</td>
+        <td class="text-nowrap">${btn('Present', 'P', 'btn-success')} ${btn('Absent', 'A', 'btn-danger')} ${btn('N', 'N', 'btn-warning')} ${btn('Late', 'L', 'btn-info')} ${btn('OD', 'OD', 'btn-primary')} ${btn('-', '-', 'btn-secondary')}</td>
         <td class="small">${d.source === 'face_attendance' ? '<span class="badge bg-info text-dark">AI face</span>' : '<span class="text-muted">Manual</span>'}</td>
       </tr>`;
     }).join('');
@@ -289,7 +289,7 @@
     roster = d.students || [];
     draft = {};
     touched = new Set();
-    roster.forEach((s) => { draft[String(s.id)] = { status: s.status || 'Absent', source: 'manual', confidence: null, flagged: 0 }; });
+    roster.forEach((s) => { draft[String(s.id)] = { status: s.status || '-', source: 'manual', confidence: null, flagged: 0 }; });
   }
 
   async function openJob(jobId) {
@@ -507,7 +507,7 @@
         const ai = d.source === 'face_attendance';
         return {
           student_id: s.id,
-          status: d.status || 'Absent',
+          status: d.status || '-',
           source: ai ? 'face_attendance' : 'manual',
           confidence: ai ? d.confidence : null,
           flagged: ai ? (d.flagged ? 1 : 0) : 0,
@@ -589,7 +589,7 @@
     $('faceAllAbsent').addEventListener('click', () => {
       roster.forEach((s) => {
         const key = String(s.id);
-        draft[key] = Object.assign({}, statusForStudent(s.id), { status: 'Absent', source: 'manual', confidence: null, flagged: 0 });
+        draft[key] = Object.assign({}, statusForStudent(s.id), { status: 'N', source: 'manual', confidence: null, flagged: 0 });
         touched.add(key);
       });
       renderRoster();

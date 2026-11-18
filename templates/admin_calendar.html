@@ -10,8 +10,8 @@
           <form id="calForm">
             <div class="mb-2"><label class="form-label small">Title *</label><input class="form-control form-control-sm" name="title" required></div>
             <div class="row g-2 mb-2">
-              <div class="col-6"><label class="form-label small">Date *</label><input class="form-control form-control-sm" type="date" name="date" required></div>
-              <div class="col-6"><label class="form-label small">End date</label><input class="form-control form-control-sm" type="date" name="end_date"></div>
+              <div class="col-6"><label class="form-label small">Date *</label><input id="calStartDate" class="form-control form-control-sm" type="date" name="date" required></div>
+              <div class="col-6"><label class="form-label small">End date</label><input id="calEndDate" class="form-control form-control-sm" type="date" name="end_date"></div>
             </div>
             <div class="mb-2"><label class="form-label small">Type *</label>
               <select class="form-select form-select-sm" name="type" id="calType">
@@ -54,12 +54,17 @@ async function loadCal(){
   $('calBody').innerHTML=rows.length?rows.map(x=>`<tr><td class="small">${esc(x.date)}${x.end_date&&x.end_date!==x.date?' ? '+esc(x.end_date):''}</td><td><span class="badge ${x.type==='holiday'?'bg-danger':x.type==='event'?'bg-info text-dark':x.type==='exam'?'bg-warning text-dark':'bg-secondary'}">${esc(x.type)}</span></td><td>${esc(x.title)}</td><td class="small">${esc(x.class_name||'All')}</td><td class="small text-muted">${esc(x.notes||'')}</td><td><button class="btn btn-outline-danger btn-sm" onclick="delCal(${x.id})">Delete</button></td></tr>`).join(''):'<tr><td colspan="6" class="small text-muted">No entries. Add holidays/events to inform student dashboards.</td></tr>';
 }
 $('calForm').addEventListener('submit', async e=>{
-  e.preventDefault(); msg('Saving...');
+  e.preventDefault();
+  const start=$('calStartDate').value, end=$('calEndDate').value;
+  $('calEndDate').min=start||'';
+  if(end && start && end<start){ msg('End date cannot be before the start date.','text-danger'); return; }
+  msg('Saving...');
   const fd=new FormData(e.target); fd.set('affects_attendance', $('affects').checked?'1':'0');
   const r=await fetch('/api/admin/calendar',{method:'POST',body:fd,credentials:'same-origin'});
   const d=await r.json().catch(()=>({}));
   if(r.ok&&d.ok){msg('Saved','text-success'); e.target.reset(); $('affects').checked=true; loadCal();} else msg(d.error||'Failed','text-danger');
 });
+$('calStartDate').addEventListener('change',()=>{ $('calEndDate').min=$('calStartDate').value||''; });
 window.delCal=async id=>{ if(!confirm('Delete this calendar entry?')) return; const r=await fetch('/api/admin/calendar/'+id,{method:'DELETE'}); const d=await r.json().catch(()=>({})); if(r.ok&&d.ok) loadCal(); else msg(d.error||'Delete failed','text-danger'); };
 $('reloadCal').addEventListener('click', loadCal); loadCal();
 </script>

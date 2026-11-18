@@ -26,7 +26,7 @@
       <div class="col-6 col-md-2"><input class="form-control form-control-sm" type="date" name="to" value="{{ date_to }}"></div>
       <div class="col-6 col-md-2"><select name="status" class="form-select form-select-sm">
         <option value="">All statuses</option>
-        {% for st in ['Present','Absent','Late','OD','Medical Leave'] %}<option value="{{ st }}" {% if status == st %}selected{% endif %}>{{ st }}</option>{% endfor %}
+        {% for st in ['Present','Absent','N','Late','OD','Medical Leave','-'] %}<option value="{{ st }}" {% if status == st %}selected{% endif %}>{{ st }}</option>{% endfor %}
       </select></div>
       <div class="col-6 col-md-2"><select name="period" class="form-select form-select-sm">
         <option value="">All periods</option>
@@ -59,6 +59,7 @@
               {% elif d.status == 'OD' %}<span class="badge bg-primary">OD</span>
               {% elif d.status == 'Late' %}<span class="badge bg-warning text-dark">Late</span>
               {% elif d.status == 'N' %}<span class="badge bg-dark">N</span>
+              {% elif d.status == '-' %}<span class="badge bg-secondary">-</span>
               {% else %}<span class="badge bg-success">{{ d.status or '-' }}</span>{% endif %}
             </td>
             <td class="small">{{ d.source or '-' }}</td>
