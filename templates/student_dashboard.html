@@ -16,6 +16,8 @@
     .st-btn{border:0;border-radius:.45rem;padding:.2rem .35rem;min-width:44px;min-height:34px;font-weight:700;font-size:.72rem;cursor:pointer;width:100%}
     .st-Present{background:#dcfce7;color:#166534}
     .st-Absent{background:#fee2e2;color:#991b1b}
+    .st-N{background:#ffedd5;color:#9a3412}
+    .st-Unmarked{background:#e2e8f0;color:#475569;font-weight:600}
     .st-OD{background:#dbeafe;color:#1d4ed8}
     .st-Late{background:#fef3c7;color:#92400e}
     .st-MedicalLeave{background:#ede9fe;color:#6d28d9}
@@ -81,7 +83,7 @@
           <div class="col-6 col-md-4 col-xl-2"><div class="card p-2 h-100 metric-card"><div class="label">Semester</div><div class="value" style="font-size:.9rem" id="mSemester">-</div><div class="sub" id="mSemesterSub">selected period</div></div></div>
           <div class="col-6 col-md-4 col-xl-2"><div class="card p-2 h-100 metric-card"><div class="label">Working Days</div><div class="value" id="mWork">-</div><div class="sub">scheduled days counted</div></div></div>
           <div class="col-6 col-md-4 col-xl-2"><div class="card p-2 h-100 metric-card"><div class="label">Days Present</div><div class="value text-success" id="mPresent">-</div><div class="sub">Present / Late / OD / Medical</div></div></div>
-          <div class="col-6 col-md-4 col-xl-2"><div class="card p-2 h-100 metric-card"><div class="label">Days Absent</div><div class="value text-danger" id="mAbsent">-</div><div class="sub">includes default Absent</div></div></div>
+          <div class="col-6 col-md-4 col-xl-2"><div class="card p-2 h-100 metric-card"><div class="label">Days Absent</div><div class="value text-danger" id="mAbsent">-</div><div class="sub">Absent and N counted</div></div></div>
           <div class="col-6 col-md-4 col-xl-2"><div class="card p-2 h-100 metric-card"><div class="label">Overall %</div><div class="value" id="mPct">-</div><div class="sub"><span id="mMarked">0</span> of <span id="mScheduled">0</span> periods</div></div></div>
           <div class="col-6 col-md-4 col-xl-2"><div class="card p-2 h-100 metric-card"><div class="label">OD / Late</div><div class="value" style="font-size:1rem"><span id="mOd">0</span> OD / <span id="mLate">0</span> Late</div><div class="sub"><span id="mAbsentP">0</span> absent, <span id="mNotMarked">0</span> not marked</div></div></div>
         </div>
@@ -126,7 +128,7 @@
         <div class="col-12 col-lg-8">
           <div class="card p-3 shadow-sm glass-card h-100">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-              <div><h5 class="section-title">Period-by-Period Attendance (7 Periods)</h5><div class="muted-help">Click a status cell to see how it was recorded. Unmarked past periods show as default Absent.</div></div>
+              <div><h5 class="section-title">Period-by-Period Attendance (7 Periods)</h5><div class="muted-help">Click a status cell to see how it was recorded. "-" means unmarked and is excluded from totals; N counts as an absence.</div></div>
             </div>
             <div class="grid-wrap">
               <table class="table table-sm att-grid mb-0">
@@ -156,7 +158,7 @@
           </div>
           <div class="card p-3 shadow-sm glass-card mb-3">
             <h5 class="section-title">Absentia Audit</h5>
-            <div class="muted-help mb-2">Absent periods in the selected range, including default Absent for unmarked past periods.</div>
+            <div class="muted-help mb-2">Absent and N periods in the selected range. Unmarked "-" periods are excluded.</div>
             <div id="auditList" style="max-height:360px;overflow:auto"><div class="small text-muted">Loading...</div></div>
           </div>
           <div class="card p-3 shadow-sm glass-card">

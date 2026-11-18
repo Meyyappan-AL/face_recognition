@@ -116,7 +116,7 @@
 (function(){
   const $=id=>document.getElementById(id);
   const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-  const COLORS={present:'#16a34a',absent:'#dc2626',late:'#f59e0b',od:'#2563eb',medical:'#7c3aed',other:'#64748b'};
+  const COLORS={present:'#16a34a',absent:'#dc2626',late:'#f59e0b',od:'#2563eb',medical:'#7c3aed',other:'#64748b',unmarked:'#94a3b8'};
   let statusChart=null, compareChart=null, students=[], defaulters=[];
 
   function params(){
@@ -135,8 +135,8 @@
   }
 
   function drawStatus(t){
-    const labels=['Present','Absent','Late','OD','Medical','Other'];
-    const keys=['present','absent','late','od','medical','other'];
+    const labels=['Present','Absent','Late','OD','Medical','Other','Unmarked (-)'];
+    const keys=['present','absent','late','od','medical','other','unmarked'];
     const values=keys.map(k=>Number(t[k]||0));
     const colors=keys.map(k=>COLORS[k]);
     $('statusLegend').innerHTML=keys.map((k,i)=>`<div class="col-6"><span class="d-inline-block rounded-circle me-1" style="width:9px;height:9px;background:${colors[i]}"></span>${labels[i]}: <strong>${values[i]}</strong></div>`).join('');

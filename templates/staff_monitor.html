@@ -7,7 +7,7 @@
         <div class="card p-3 shadow-sm glass-card mb-3">
           <h5>Staff / HOD Options</h5>
           <p class="small text-muted mb-1">Logged in as: <strong>{{ (user.display_name if user else session.get('display_name')) or session.get('username') }}</strong>{% if user and user.is_hod %} <span class="badge bg-danger">HOD</span>{% endif %}{% if user and user.is_advisor %} <span class="badge bg-primary">Advisor {{ user.advisor_class }}</span>{% endif %}</p>
-          <p class="small text-muted mb-2">Manual attendance: select classroom, date, and period (timetable-restricted). Default is <strong>Absent</strong>; mark Present explicitly. No camera, no exit/sign-out. Advisor has full-day access for their own class only; HOD can override. Handling staff can mark OD for handled periods per policy.</p>
+          <p class="small text-muted mb-2">Manual attendance: select classroom, date, and period (timetable-restricted). Unmarked periods show <strong>-</strong> from 06:00 IST and are excluded from totals; use <strong>N</strong> for an absence. Staff window closes at 22:00 IST on day 15. Advisor has full-day access for their own class only; HOD can override.</p>
           <div class="d-grid gap-2">
             <a class="btn btn-warning" href="/take_attendance">Take Attendance (Manual, Period-wise)</a>
             <a class="btn btn-outline-primary btn-sm" href="/attendance_record?period=daily">Today's Records</a>
@@ -15,6 +15,15 @@
             <a class="btn btn-outline-secondary btn-sm" href="/reports">Reports / Analytics / CSV Export</a>
             <a class="btn btn-outline-dark btn-sm" href="/profile">Edit My Profile / Password</a>
           </div>
+        </div>
+
+        <div class="card p-3 shadow-sm glass-card mb-3">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h5 class="mb-1">Unmarked Period Reminders <span class="badge bg-warning text-dark" id="staffAlertCount">0</span></h5>
+            <button class="btn btn-outline-secondary btn-sm" id="staffAlertsReadAll" type="button">Mark all read</button>
+          </div>
+          <div class="muted-help mb-2">Daily digests for past periods still marked "-" while the staff window is open. Assigned staff get their slots; unassigned slots are visible to admins.</div>
+          <div id="staffAlertsList" class="small"><div class="text-muted">Loading...</div></div>
         </div>
 
         <div class="card p-3 shadow-sm glass-card mb-3">
@@ -35,4 +44,29 @@
       </div>
     </div>
   </div>
+<script>
+  function escStaff(v){ return String(v==null?'':v).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  async function loadStaffAlerts(){
+    const box=document.getElementById('staffAlertsList');
+    try{
+      const r=await fetch('/api/staff/alerts'); const d=await r.json();
+      if(!d.ok) throw new Error(d.error||'Failed to load reminders');
+      document.getElementById('staffAlertCount').textContent=String(d.unread||0);
+      box.innerHTML=(d.alerts||[]).length?d.alerts.map(a=>`<div class="p-2 mb-2 bg-light rounded" data-alert-id="${Number(a.id)}"><div class="d-flex justify-content-between gap-2"><strong>${escStaff(a.title)}</strong>${a.read?'<span class="badge bg-secondary">read</span>':'<button class="btn btn-link btn-sm p-0 staff-alert-read" type="button">Mark read</button>'}</div><div class="text-muted">${escStaff(a.body).replace(/\n/g,'<br>')}</div></div>`).join(''):'<div class="text-muted">No unmarked-period reminders.</div>';
+    }catch(e){ box.innerHTML='<div class="text-danger small">'+escStaff(e.message||e)+'</div>'; }
+  }
+  document.addEventListener('click', async ev=>{
+    const btn=ev.target.closest('.staff-alert-read');
+    if(btn){
+      const wrap=btn.closest('[data-alert-id]');
+      await fetch('/api/staff/alerts/'+Number(wrap.dataset.alertId)+'/read',{method:'POST'});
+      loadStaffAlerts(); return;
+    }
+    if(ev.target.closest('#staffAlertsReadAll')){
+      await fetch('/api/staff/alerts/read_all',{method:'POST'});
+      loadStaffAlerts();
+    }
+  });
+  loadStaffAlerts();
+</script>
 {% endblock %}

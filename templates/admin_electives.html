@@ -212,7 +212,7 @@
     const cls=$('cls').value;
     if(!cls){ msg('Select a class.','danger'); return; }
     if(dirty && !confirm('Discard unsaved changes and load '+cls+'?')) return;
-    msg('Loading '+cls+'...');
+    msg('Loading '+cls+'...'); $('loadBtn').disabled=true;
     try{
       const selId=$('version').value;
       let url='/api/admin/electives?class='+encodeURIComponent(cls)+'&semester_id='+encodeURIComponent(currentSem()||'');
@@ -223,6 +223,7 @@
       await loadAudit();
       msg('Loaded '+students.length+' students and '+slots.length+' elective slots for '+esc(cls)+(currentVersion?(' · v'+currentVersion.version_no):' · no version')+'.','success');
     }catch(e){ msg('Could not load electives: '+esc(e.message||e),'danger'); }
+    finally{ $('loadBtn').disabled=false; }
   }
 
   function onCellChange(e){

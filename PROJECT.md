@@ -26,14 +26,14 @@ This file is the source of truth for continuing the ERP project in a new chat. R
   - `.env`
 - Do not commit or print real SMTP/Fast2SMS/VAPID secrets.
 - Current scope is **local-only**: manual period attendance plus admin-only webcam/uploaded-video attendance. Cloud hosting, Supabase/Postgres, Cloudflare R2, and CCTV/RTSP are deferred until staff approval. Manual attendance remains the primary path.
-- Current server behavior still persists automatic `Absent` rows after scheduled slots end. Approved Wave 2 replaces this with stored `-` rows from class date `06:00` until explicit marking; do not implement the new policy in Wave 1.
+- Current server behavior persists stored `-` unmarked rows from class date `06:00` until explicit marking. Automatic `Absent` rows were migrated to `-` in Wave 2.
 - Student identity and duplicate prevention are keyed on `reg_no`, **not** roll number.
 - Admin/HOD can override attendance restrictions after cutoff until the semester end date; future attendance is never editable and all manual changes close after semester end. Advisors have full-day access only for their own class.
 - No real notification credentials are configured in `.env`; notification sending must remain optional and gracefully disabled.
 
 ## 3. Current High-Level Status
 
-The ERP is functional for the main admin, staff, HOD/advisor, and student flows. Recent work added notification infrastructure, active-account enforcement, dependency/env files, a shared base template/nav for most admin pages, persisted default-Absent materialization, semester-end edit windows, day-of OD application, semester-scoped timetable versions with a manual grid editor and PDF/image reference upload, version-scoped elective mappings with immutable per-entry elective labels and a shared elective roster, role-scoped attendance insights with comparisons/absence filters, medical leave and student analytics, and admin-only webcam/video face attendance with review-before-submit.
+The ERP is functional for the main admin, staff, HOD/advisor, and student flows. Recent work added notification infrastructure, active-account enforcement, dependency/env files, a shared base template/nav for most admin pages, persisted default-Absent materialization, semester-end edit windows, day-of OD application, semester-scoped timetable versions with a manual grid editor and PDF/image reference upload, version-scoped elective mappings with immutable per-entry elective labels and a shared elective roster, role-scoped attendance insights with comparisons/absence filters, medical leave and student analytics, and admin-only webcam/video face attendance with review-before-submit. Wave 2 adds real `N` status, stored `-` unmarked periods, configurable marking window, in-app staff unmarked-period reminders, and calendar/timetable/elective polish.
 
 ### Completed and verified
 
@@ -50,7 +50,7 @@ The ERP is functional for the main admin, staff, HOD/advisor, and student flows.
   - Audit log
   - Records and reports
   - Webcam/video face attendance
-- Manual attendance supports class, date, period 1-7, statuses Present/Absent/OD/Late.
+- Manual attendance supports class, date, period 1-7, statuses Present/Absent/N/OD/Late/Medical Leave, plus `-` to reset a period to unmarked.
 - OD workflow supports submission, advisor/HOD review, proof, expiry, cancellation/reversal, and student history.
 - Medical leave workflow supports mandatory certificates, advisor then HOD review, automatic attendance crediting, HOD cancellation/reversal, student cancellation, review/history views, and contact-only advisor coordination (no online notifications).
 - Student dashboard analytics now include a threshold warning, goal calculator, monthly heatmap, subject/elective breakdown, today/next class, and CSV export; `Medical Leave` is credited like Present/Late/OD.
@@ -64,8 +64,8 @@ The ERP is functional for the main admin, staff, HOD/advisor, and student flows.
 - Role-aware navigation: students see Dashboard / My Academics / OD / Medical / Alerts / Profile / Logout; staff/HOD see their operational pages plus Medical Review for HOD/advisor; admin additionally sees Semesters and Face Attendance.
 - Admin-managed semesters (`semesters` table) with one current semester; legacy settings are seeded/synced for compatibility.
 - Student dashboard and staff reports/records accept a semester dropdown. Current semester runs start..today; completed semester runs start..last scheduled working day.
-- Student dashboard stats now use the full scheduled semester grid: unmarked past periods count as default Absent, future periods remain Not Marked, and the percentage uses counted (ended) scheduled periods.
-- Default Absent rows are now persisted by a background worker with idempotent materialization; edit windows enforce same-day/cutoff/semester-end rules and reject future writes.
+- Student dashboard stats now use the full scheduled semester grid: unmarked past periods show `-` and are excluded from totals, future periods remain Not Marked, `N` counts as absent, and percentages use explicitly marked periods only.
+- Unmarked `-` rows are persisted by a background worker with idempotent materialization; edit windows enforce class-date 06:00 to day-15 22:00, admin/HOD corrections until semester end, and reject future writes.
 - Approved OD now applies date-by-date at/after 06:00 IST, defers future dates, and preserves explicit Present/Late.
 - Student dashboard overview UI cleaned: semester selector, concise range text, calendar moved into a collapsed panel, and marking-log modal shows real class/slot/source values.
 - Notification infrastructure exists:
@@ -182,6 +182,9 @@ Verified recently:
 - Wave 1 smoke test passed `29/29` on a temporary DB. It covers admin page rendering, staff create/profile persistence/deactivate/reactivate/archive and login enforcement, student role storage for Representative/Ambassador/custom/blank roles, `rep_badge()` behavior, settings metadata and clamps, and audit filters/search/elective compatibility.
 - Wave 1 guarded real-DB migration completed with backup `C:\Users\alagu\AppData\Local\Temp\opencode\wave1_attendance_backup_pre_migration.db`; it added the Wave 1 user profile columns, `students.student_role`, and audit indexes. Existing four students currently have blank roles.
 - Re-run after Wave 1: `phase1_redesign` all passed; Phase 3 `17/17`, Phase 4 `23/23`, Phase 5 `46/46`, Phase 6 `36/36`, and Phase A/B `33/33` passed. Phase 7 reported `28/29` only because its final assertion expects the shared face-crop upload directory to be empty and pre-existing crop files were present. `phase_cd_smoke` reported `18/19` only because its copied real DB contains an overlapping `2025-08-01..2025-12-31` semester; a clean probe confirmed `attendance_edit_allowed()` correctly closes after `2025-09-01`. Neither failure is a Wave 1 code regression.
+- Wave 2 smoke test passed `28/28` on a fresh temp DB. It covers setting defaults/clamps, status normalization and helpers, analytics `-`/`N` behavior, 06:00/day-15/future window boundaries, unmarked reminder creation and staff assignment, reminder read/read-all endpoints, digest updates and cleanup, admin settings, calendar end-date validation, timetable reference class validation, and elective version validation.
+- Wave 2 guarded real-DB migration completed with backups `C:\Users\alagu\AppData\Local\Temp\opencode\wave2_attendance_backup_pre_migration.db` and `C:\Users\alagu\AppData\Local\Temp\opencode\wave2_attendance_backup_pre_migration_20261118_225752.db`. It converted `2572` `source='auto_absent'` `Absent` entries to `-`, preserved four manual `Absent` entries, sanitized auto-created session labels, added `staff_alerts`, and set attendance window settings to `06:00`, `15` days, `22:00`.
+- Re-run after Wave 2: Wave 1 `29/29`, timetable `15/15`, elective migration `1/1`, electives `17/17`, insights `23/23`, medical `46/46`, face `36/36`, and Phase A/B `33/33` passed. Two smoke-script expectations were updated for the approved Wave 2 policy: medical cancellation reverts to `-` instead of `Absent`, and the dashboard synthetic-cell check accepts `-`/`N`.
 
 Important current local data state:
 
@@ -500,7 +503,7 @@ Verification: `python -m py_compile app.py` passes; a 33-check temporary-DB smok
 ### Consolidated Wave Plan (approved)
 
 - Wave 1 — foundation closeout, student role, staff management, settings/audit (completed server-side; browser verification pending).
-- Wave 2 — academic calendar polish, timetable polish, electives polish, real `N` attendance status, hyphen `-` unmarked policy, and staff unmarked-period reminders.
+- Wave 2 — academic calendar polish, timetable polish, electives polish, real `N` attendance status, hyphen `-` unmarked policy, and staff unmarked-period reminders (completed server-side; browser verification pending).
 - Wave 3 — webcam/camera fixes and optional YuNet/SFace model upgrade.
 - Wave 4 — records/reports finalization and final QA/handoff.
 
@@ -511,13 +514,15 @@ Approved Wave 1 student-role rule:
 - `Representative` renders as `Rep` beside the student name across UI surfaces.
 - CSV/report exports remain unchanged.
 
-Approved Wave 2 attendance rule (not yet implemented):
+Approved Wave 2 attendance rule (implemented):
 - Replace automatic `Absent` with stored `-` rows.
 - From class date `06:00` onward, scheduled unmarked periods show `-` until explicitly marked.
 - Present, Absent, OD, Late, N, and Medical Leave stop `-`.
 - Staff marking window: class date `06:00` to 15th day `22:00`; HOD/Admin corrections remain open until semester end.
 - Existing `source='auto_absent'` rows should be converted to `-`.
 - Reminders are in-app only: daily digest to assigned staff from the next day until marked, stopping after the 15-day window.
+- Timetable slot staff receive the reminder; when a slot has no listed staff, fall back to the class advisor, and leave the alert unassigned for admin visibility when neither is available.
+- If a digest changes (for example, one student is marked), the existing alert is updated and returned to unread; when no unmarked periods remain or the window closes, stale digests are removed.
 
 ## 8. Credentials and Seeding
 
@@ -711,7 +716,8 @@ Use the `grep` tool for deeper searches.
    - Local Phase 7: verification and cleanup (completed server-side; manual browser/real-footage checks remain)
    - Redesign Phase 1: admin/student foundation (completed server-side; manual responsive UI checklist pending)
    - Wave 1: student role, staff management, settings/audit (completed server-side; manual browser verification pending)
-   - Next: manual browser verification of Wave 1, then Wave 2 (`N` status, `-` unmarked policy, reminders, calendar/timetable/electives polish)
+   - Wave 2: `N` status, `-` unmarked policy, staff reminders, calendar/timetable/electives polish (completed server-side; manual browser verification pending)
+   - Next: manual browser verification of Waves 1-2, then Wave 3 (webcam/camera fixes and optional YuNet/SFace model upgrade)
    - Deployment-machine/browser verification and real classroom accuracy testing remain when data is available
    - Cloud/R2/Postgres/CCTV remain deferred until staff approval
    - Real-channel notification delivery still requires SMTP/Fast2SMS/VAPID credentials

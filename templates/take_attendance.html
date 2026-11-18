@@ -37,10 +37,10 @@
         </div>
         <div class="col-md-2 d-grid gap-1">
           <button id="loadBtn" class="btn btn-primary btn-sm">Load Students</button>
-          <button id="resetBtn" class="btn btn-outline-secondary btn-sm" type="button">Reset Absent</button>
+          <button id="resetBtn" class="btn btn-outline-secondary btn-sm" type="button">Reset Unmarked</button>
         </div>
       </div>
-      <div class="small text-muted mt-2"><strong>Default:</strong> <strong>Absent</strong> for ended periods. <strong>Manual:</strong> handling staff may change marks only for the <strong>same IST date and before the configured cutoff (6:00 PM IST)</strong>. <strong>HOD/Admin</strong> may correct after cutoff <strong>until the semester end date</strong>. Future attendance is closed. Approved OD applies date-by-date at/after <strong>06:00 IST</strong> and never overrides explicit Present/Late. Timetable/advisor/HOD access rules still apply.</div>
+      <div class="small text-muted mt-2"><strong>Default:</strong> scheduled periods with no explicit mark show <strong>-</strong> from 06:00 IST on the class date and are excluded from totals. Use <strong>N</strong> for an absence. <strong>Staff window:</strong> class date 06:00 IST to day 15, 22:00 IST. <strong>HOD/Admin</strong> may correct until the semester end date. Future attendance is closed. Approved OD applies date-by-date at/after 06:00 IST. Timetable/advisor/HOD access rules still apply.</div>
       <div id="msg" class="small mt-2"></div>
     </div>
 
@@ -50,14 +50,14 @@
         <div class="d-flex gap-2 flex-wrap">
           <input id="searchBox" class="form-control form-control-sm" style="min-width:180px" placeholder="Search name/reg/roll">
           <button id="allPresent" class="btn btn-outline-success btn-sm" type="button">All Present</button>
-          <button id="allAbsent" class="btn btn-outline-warning btn-sm" type="button">All Absent</button>
+          <button id="allAbsent" class="btn btn-outline-warning btn-sm" type="button">All N</button>
           <button id="submitBtn" class="btn btn-success btn-sm" disabled>Submit Attendance</button>
         </div>
       </div>
       <div class="table-wrap">
         <table class="table table-sm align-middle sticky-head">
           <thead><tr>
-            <th>Photo</th><th>Reg No</th><th>Name</th><th>Roll</th><th>Details</th><th>Elective</th><th style="min-width:220px">Status (default Absent)</th>
+            <th>Photo</th><th>Reg No</th><th>Name</th><th>Roll</th><th>Details</th><th>Elective</th><th style="min-width:300px">Status (default -)</th>
           </tr></thead>
           <tbody id="rosterBody"><tr><td colspan="7" class="text-muted small">Load a period to view students.</td></tr></tbody>
         </table>
@@ -94,8 +94,8 @@ function render(){
   const rows=roster.filter(s=>!q||[s.name,s.reg_no,s.roll,s.class].join(' ').toLowerCase().includes(q));
   $('countBadge').textContent=roster.length;
   $('rosterBody').innerHTML = rows.length? rows.map(s=>{
-    const st=s.status||'Absent'; const notEditable=s.edit_allowed===false; const locked=!!s.locked_absent; const odlock=!!s.locked_od; const mlock=!!s.locked_medical;
-    const btn=(v,label,cls)=>{ const blocked=notEditable||(locked&&v!=='Absent')||odlock||mlock; return `<button type="button" class="btn btn-sm ${cls} status-btn ${st===v?'active':''}" data-id="${s.id}" data-status="${v}" ${blocked?'disabled':''} ${notEditable?`title="${esc(s.edit_reason||'Edit window closed')}"`:(odlock?'title="Approved Day OD (Advisor+HOD)"':mlock?'title="Approved Medical Leave (Advisor+HOD)"':'')}>${label}</button>`; };
+    const st=s.status||'-'; const notEditable=s.edit_allowed===false; const locked=!!s.locked_absent; const odlock=!!s.locked_od; const mlock=!!s.locked_medical;
+    const btn=(v,label,cls)=>{ const blocked=notEditable||(locked&&v!==st)||odlock||mlock; return `<button type="button" class="btn btn-sm ${cls} status-btn ${st===v?'active':''}" data-id="${s.id}" data-status="${v}" ${blocked?'disabled':''} ${notEditable?`title="${esc(s.edit_reason||'Edit window closed')}"`:(odlock?'title="Approved Day OD (Advisor+HOD)"':mlock?'title="Approved Medical Leave (Advisor+HOD)"':'')}>${label}</button>`; };
     return `<tr data-sid="${s.id}">
       <td>${s.photo_url?`<img class="roster-photo" src="${s.photo_url}" alt="">`:`<div class="roster-photo d-inline-flex align-items-center justify-content-center text-muted small">N/A</div>`}</td>
       <td>${esc(s.reg_no||'-')}</td>
@@ -106,9 +106,12 @@ function render(){
       <td><div class="d-flex flex-wrap gap-1 align-items-center">
         ${st==='Medical Leave'?'<span class="badge status-medical">Medical Leave</span>':''}
         <div class="btn-group btn-group-sm" role="group">
-        ${btn('Present','Present','btn-outline-success')}
-        ${btn('Absent','Absent','btn-outline-secondary')}
+        ${btn('Present','P','btn-outline-success')}
+        ${btn('Absent','A','btn-outline-danger')}
+        ${btn('N','N','btn-outline-warning')}
+        ${btn('Late','L','btn-outline-info')}
         ${btn('OD','OD','btn-outline-primary')}
+        ${btn('-','-','btn-outline-secondary')}
         </div>
       </div></td>
     </tr>`;
@@ -129,7 +132,7 @@ $('loadBtn').addEventListener('click', async ()=>{
   const r=await fetch(`/api/attendance/roster?class=${encodeURIComponent(cls)}&date=${encodeURIComponent(date)}&period=${encodeURIComponent(period)}`);
   const d=await r.json();
   if(!r.ok||!d.ok){setMsg(d.error||'Failed to load roster.','text-danger'); roster=[]; canMark=false; render(); return;}
-  roster=(d.students||[]).map(s=>({...s,status:s.status||'Absent',default_status:'Absent'}));
+  roster=(d.students||[]).map(s=>({...s,status:s.status||'-',default_status:'-'}));
   ctx={class:cls,date,period,cell:d.cell||{}};
   canMark=!!d.edit_allowed; $('submitBtn').disabled=!canMark;
   $('rosterTitle').textContent=`${cls} | ${date} | Period ${period} | ${d.cell?.display||d.cell?.subject||''}`;
@@ -137,16 +140,16 @@ $('loadBtn').addEventListener('click', async ()=>{
   render();
 });
 
-function setAll(status){roster.forEach(s=>{if(s.locked_medical||s.locked_od) return; if(s.locked_absent&&status!=='Absent') return; s.status=status;}); render();}
+function setAll(status){roster.forEach(s=>{if(s.locked_medical||s.locked_od) return; if(s.locked_absent&&status!==s.status) return; s.status=status;}); render();}
 $('allPresent').addEventListener('click',()=>setAll('Present'));
-$('allAbsent').addEventListener('click',()=>setAll('Absent'));
-$('resetBtn').addEventListener('click',()=>{setAll('Absent'); setMsg('Reset all to Absent (default).','text-muted');});
+$('allAbsent').addEventListener('click',()=>setAll('N'));
+$('resetBtn').addEventListener('click',()=>{setAll('-'); setMsg('Reset all to unmarked (-).','text-muted');});
 
 $('submitBtn').addEventListener('click', async ()=>{
   if(!canMark||!ctx.class){setMsg('Load roster first.','text-danger'); return;}
   if(!confirm(`Submit attendance for ${ctx.class} ${ctx.date} Period ${ctx.period}?`)) return;
   $('submitBtn').disabled=true; setMsg('Submitting...');
-  const payload={class:ctx.class,date:ctx.date,period:ctx.period,marks:roster.map(s=>({student_id:s.id,status:s.status||'Absent'}))};
+  const payload={class:ctx.class,date:ctx.date,period:ctx.period,marks:roster.map(s=>({student_id:s.id,status:s.status||'-'}))};
   const r=await fetch('/api/attendance/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.ok){setMsg(d.error||('Submit failed (HTTP '+r.status+')'),'text-danger'); $('submitBtn').disabled=false; return;}

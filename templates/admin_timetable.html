@@ -579,7 +579,10 @@
 
   $('versionRows').addEventListener('click',e=>{
     const load=e.target.closest('[data-load-version]');
-    if(load){ state.dirty=false; loadVersion(load.dataset.loadVersion); return; }
+    if(load){
+      if(state.dirty && !confirm('Discard unsaved changes and load this version?')) return;
+      loadVersion(load.dataset.loadVersion); return;
+    }
     const restore=e.target.closest('[data-restore-version]');
     if(restore) restoreVersion(restore.dataset.restoreVersion);
   });

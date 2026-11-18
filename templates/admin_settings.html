@@ -32,7 +32,9 @@
             </div>
             <div class="row g-3">
               <div class="col-md-6"><label class="form-label small">Defaulter threshold (%)</label><input class="form-control form-control-sm" type="number" min="1" max="100" step="0.01" name="defaulter_threshold"><div class="form-text">Students below this percentage appear in defaulter reports. Allowed: 1-100.</div></div>
-              <div class="col-md-6"><label class="form-label small">Manual attendance cutoff (IST hour)</label><input class="form-control form-control-sm" type="number" min="0" max="23" name="attendance_cutoff_hour"><div class="form-text">Staff can submit same-day attendance before this hour. HOD/Admin may correct after cutoff until the semester end date; future attendance is always closed. Allowed: 0-23.</div></div>
+              <div class="col-md-6"><label class="form-label small">Unmarked placeholders open (IST hour)</label><input class="form-control form-control-sm" type="number" min="0" max="23" name="attendance_start_hour"><div class="form-text">Scheduled periods with no explicit mark display "-" from this hour on the class date. Allowed: 0-23.</div></div>
+              <div class="col-md-6"><label class="form-label small">Staff marking window (days)</label><input class="form-control form-control-sm" type="number" min="1" max="60" name="attendance_window_days"><div class="form-text">Counting the class date as day 1; default is 15 days.</div></div>
+              <div class="col-md-6"><label class="form-label small">Staff marking window closes (IST hour)</label><input class="form-control form-control-sm" type="number" min="0" max="23" name="attendance_cutoff_hour"><div class="form-text">Staff may mark until this hour on the final window day. HOD/Admin may correct until the semester end date. Allowed: 0-23.</div></div>
             </div>
           </div>
 
@@ -64,7 +66,7 @@
           <div class="erp-muted mb-2" id="runtimeNote">Loading effective rules...</div>
           <table class="table table-sm mb-0">
             <tr><th style="width:42%">Current semester</th><td><span id="runtimeSemester">-</span></td></tr>
-            <tr><th>Staff marking cutoff</th><td><span id="cutoff">-</span>:00 IST, same day only</td></tr>
+            <tr><th>Staff marking window</th><td><span id="windowLabel">-</span></td></tr>
             <tr><th>HOD / Admin correction</th><td><span id="runtimeCorrection">After cutoff until semester end date</span></td></tr>
             <tr><th>OD auto-reject</th><td>Last OD date 18:00 IST if not fully approved</td></tr>
             <tr><th>HOD cancel window</th><td>Until last OD date 23:59:59 IST</td></tr>
@@ -101,11 +103,11 @@ const f=document.getElementById('setForm');
 function msg(t,c='text-muted'){const e=document.getElementById('setMsg'); e.className='small mb-0 '+c; e.textContent=t;}
 function applyRuntime(d){
   const s=d.settings||{}; const r=d.runtime||{};
-  const cutoff=s.attendance_cutoff_hour||'18';
-  document.getElementById('cutoff').textContent=cutoff;
+  const start=s.attendance_start_hour||'6'; const cutoff=s.attendance_cutoff_hour||'22'; const days=s.attendance_window_days||'15';
+  document.getElementById('windowLabel').textContent=`${start}:00 IST on class date to ${cutoff}:00 IST on day ${days}`;
   document.getElementById('runtimeSemester').textContent=r.semester_label||s.semester_label||'-';
   const end=r.semester_end||s.semester_end||'';
-  document.getElementById('runtimeCorrection').textContent=end?`After ${cutoff}:00 IST until ${end}`: (r.hod_correction_note||'After cutoff until semester end date');
+  document.getElementById('runtimeCorrection').textContent=end?`After day ${days} until ${end}`: (r.hod_correction_note||'After the staff window until semester end date');
   document.getElementById('runtimeNote').textContent=r.today_ist?`Effective as of ${r.today_ist} (IST).`:'Effective rules below.';
 }
 async function load(){
@@ -113,7 +115,7 @@ async function load(){
     const d=await erp.fetchJSON('/api/admin/settings'); const s=d.settings||{};
     f.semester_label.value=s.semester_label||''; f.semester_start.value=s.semester_start||''; f.semester_end.value=s.semester_end||'';
     f.defaulter_threshold.value=s.defaulter_threshold||'75'; f.enforce_calendar_holidays.value=s.enforce_calendar_holidays||'0';
-    f.attendance_cutoff_hour.value=s.attendance_cutoff_hour||'18';
+    f.attendance_start_hour.value=s.attendance_start_hour||'6'; f.attendance_window_days.value=s.attendance_window_days||'15'; f.attendance_cutoff_hour.value=s.attendance_cutoff_hour||'22';
     applyRuntime(d);
   }catch(e){ msg(e.message||'Could not load settings.','text-danger'); }
 }
@@ -121,12 +123,14 @@ f.addEventListener('submit', async e=>{
   e.preventDefault(); msg('Saving...');
   const payload=Object.fromEntries(new FormData(f).entries());
   try{
-    const threshold=Number(payload.defaulter_threshold); const cutoff=Number(payload.attendance_cutoff_hour);
+    const threshold=Number(payload.defaulter_threshold); const start=Number(payload.attendance_start_hour); const cutoff=Number(payload.attendance_cutoff_hour); const days=Number(payload.attendance_window_days);
     if(!Number.isFinite(threshold)||threshold<1||threshold>100) throw new Error('Defaulter threshold must be between 1 and 100.');
-    if(!Number.isFinite(cutoff)||cutoff<0||cutoff>23) throw new Error('Attendance cutoff hour must be between 0 and 23.');
+    if(!Number.isFinite(start)||start<0||start>23) throw new Error('Placeholder start hour must be between 0 and 23.');
+    if(!Number.isFinite(cutoff)||cutoff<0||cutoff>23) throw new Error('Window close hour must be between 0 and 23.');
+    if(!Number.isFinite(days)||days<1||days>60) throw new Error('Marking window must be between 1 and 60 days.');
     const d=await erp.fetchJSON('/api/admin/settings',{method:'POST',body:payload});
     msg('Saved.','text-success'); erp.toast('ERP settings saved','success');
-    if(d.settings) applyRuntime({settings:{...d.settings,attendance_cutoff_hour:d.settings.attendance_cutoff_hour||f.attendance_cutoff_hour.value}});
+    if(d.settings) applyRuntime({settings:{...d.settings,attendance_cutoff_hour:d.settings.attendance_cutoff_hour||f.attendance_cutoff_hour.value,attendance_start_hour:d.settings.attendance_start_hour||f.attendance_start_hour.value,attendance_window_days:d.settings.attendance_window_days||f.attendance_window_days.value}});
     await load();
   }catch(err){ msg(err.message||'Save failed.','text-danger'); }
 });
