@@ -109,7 +109,7 @@
   }
   function setDirty(v){ dirty=v; $('dirty').innerHTML=v?'<span class="badge bg-warning text-dark">Unsaved changes</span>':'<span class="badge bg-success">Loaded</span> '+esc(currentClass)+' '+esc(currentVersion?('v'+currentVersion.version_no):'legacy'); $('saveBtn').disabled=!students.length||!currentVersion; $('carryBtn').disabled=!currentVersion; if(v) $('saveBtn').disabled=!currentVersion; }
   function key(s){ return s.slot_key; }
-  function studentLabel(s){ return `${s.name||'-'}${s.reg_no?' · '+s.reg_no:''}`; }
+  function studentLabel(s){ return `${erp.repBadge(s.student_role)}${s.name||'-'}${s.reg_no?' · '+s.reg_no:''}`; }
   function currentSem(){ return $('sem').value?Number($('sem').value):null; }
 
   function fillSemesters(){
@@ -177,7 +177,7 @@
         const tag=val?(src[key(sl)]==='legacy'?'<div class="mt-1"><span class="legacy-tag">legacy fallback</span></div>':'<div class="mt-1"><span class="version-tag">version</span></div>'):'';
         return `<td><select class="form-select form-select-sm elective-select" data-sid="${Number(s.id)}" data-slot="${esc(key(sl))}">${opts.join('')}</select>${tag}</td>`;
       }).join('');
-      return `<tr><td class="student-col"><div class="fw-semibold">${esc(s.name||'-')}</div><div class="small text-muted">${esc(s.reg_no||'')}${s.roll?' · Roll '+esc(s.roll):''}</div></td>${cells}</tr>`;
+      return `<tr><td class="student-col"><div class="fw-semibold">${erp.repBadge(s.student_role)}${esc(s.name||'-')}</div><div class="small text-muted">${esc(s.reg_no||'')}${s.roll?' · Roll '+esc(s.roll):''}</div></td>${cells}</tr>`;
     }).join('');
     localStats();
   }

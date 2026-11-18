@@ -1,46 +1,79 @@
 {% extends "base.html" %}
 {% block title %}ERP Settings{% endblock %}
 {% block content %}
-  <div class="container" style="max-width:1050px">
+  <div class="container" style="max-width:1100px">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+      <div>
+        <h4 class="erp-section-title mb-1">ERP Settings</h4>
+        <div class="erp-muted">Academic, attendance, and calendar policy for the current ERP instance. Changes are audited.</div>
+      </div>
+      <a class="btn btn-outline-dark btn-sm" href="/admin/audit?entity=app_settings">View settings audit</a>
+    </div>
+
     <div class="row g-3">
-      <div class="col-lg-7">
-        <div class="card erp-card p-3 mb-3">
-          <h5 class="erp-section-title mb-1">Academic / Semester</h5>
-          <div class="erp-muted mb-3">These fields mirror the current semester. Use <a href="/admin/semesters">Semester Management</a> for multiple semesters, start/end dates, and selecting the current one. Calendar remains the source for holidays and events.</div>
-          <form id="setForm">
+      <div class="col-lg-8">
+        <form id="setForm">
+          <div class="card erp-card p-3 mb-3">
+            <div class="d-flex align-items-start gap-2 mb-2">
+              <span class="badge bg-primary">1</span>
+              <div><h5 class="erp-section-title mb-1">Academic &amp; Semester</h5><div class="erp-muted">These fields mirror the current semester. Use <a href="/admin/semesters">Semester Management</a> for multiple semesters and selecting the current one.</div></div>
+            </div>
             <div class="row g-3">
               <div class="col-12"><label class="form-label small">Semester / term label</label><input class="form-control form-control-sm" name="semester_label" placeholder="e.g. Odd Semester 2026-27"></div>
               <div class="col-md-6"><label class="form-label small">Semester start</label><input class="form-control form-control-sm" type="date" name="semester_start"></div>
               <div class="col-md-6"><label class="form-label small">Semester end</label><input class="form-control form-control-sm" type="date" name="semester_end"></div>
-              <div class="col-md-6"><label class="form-label small">Defaulter threshold (%)</label><input class="form-control form-control-sm" type="number" min="1" max="100" step="0.01" name="defaulter_threshold"></div>
-              <div class="col-md-6"><label class="form-label small">Manual attendance cutoff (IST hour)</label><input class="form-control form-control-sm" type="number" min="0" max="23" name="attendance_cutoff_hour"><div class="form-text">Staff can submit same-day attendance before this hour. HOD/Admin may correct after cutoff until the semester end date; future attendance is always closed.</div></div>
-              <div class="col-12"><label class="form-label small">Calendar enforcement</label>
-                <select class="form-select form-select-sm" name="enforce_calendar_holidays">
-                  <option value="0">Warn only (default)</option>
-                  <option value="1">Block staff submit on holiday (Admin/HOD override)</option>
-                </select>
+            </div>
+          </div>
+
+          <div class="card erp-card p-3 mb-3">
+            <div class="d-flex align-items-start gap-2 mb-2">
+              <span class="badge bg-success">2</span>
+              <div><h5 class="erp-section-title mb-1">Attendance Policy</h5><div class="erp-muted">Controls defaulter reporting and the normal staff marking window.</div></div>
+            </div>
+            <div class="row g-3">
+              <div class="col-md-6"><label class="form-label small">Defaulter threshold (%)</label><input class="form-control form-control-sm" type="number" min="1" max="100" step="0.01" name="defaulter_threshold"><div class="form-text">Students below this percentage appear in defaulter reports. Allowed: 1-100.</div></div>
+              <div class="col-md-6"><label class="form-label small">Manual attendance cutoff (IST hour)</label><input class="form-control form-control-sm" type="number" min="0" max="23" name="attendance_cutoff_hour"><div class="form-text">Staff can submit same-day attendance before this hour. HOD/Admin may correct after cutoff until the semester end date; future attendance is always closed. Allowed: 0-23.</div></div>
+            </div>
+          </div>
+
+          <div class="card erp-card p-3 mb-3">
+            <div class="d-flex align-items-start gap-2 mb-2">
+              <span class="badge bg-warning text-dark">3</span>
+              <div><h5 class="erp-section-title mb-1">Calendar Enforcement</h5><div class="erp-muted">Academic calendar holidays and events remain sourced from the calendar module.</div></div>
+            </div>
+            <label class="form-label small">Holiday handling</label>
+            <select class="form-select form-select-sm" name="enforce_calendar_holidays">
+              <option value="0">Warn only (default)</option>
+              <option value="1">Block staff submit on holiday (Admin/HOD override)</option>
+            </select>
+          </div>
+
+          <div class="card erp-card p-3 mb-3">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div class="d-flex gap-2">
+                <button class="btn btn-primary btn-sm" type="submit">Save Settings</button>
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="reloadSet">Reload</button>
               </div>
+              <div id="setMsg" class="small mb-0"></div>
             </div>
-            <div class="d-flex gap-2 mt-3">
-              <button class="btn btn-primary btn-sm" type="submit">Save Settings</button>
-              <button class="btn btn-outline-secondary btn-sm" type="button" id="reloadSet">Reload</button>
-            </div>
-            <div id="setMsg" class="small mt-2"></div>
-          </form>
-        </div>
+          </div>
+        </form>
 
         <div class="card erp-card p-3">
-          <h5 class="erp-section-title mb-2">Read-only runtime rules</h5>
+          <h5 class="erp-section-title mb-2">Effective Rules</h5>
+          <div class="erp-muted mb-2" id="runtimeNote">Loading effective rules...</div>
           <table class="table table-sm mb-0">
-            <tr><th>Manual attendance cutoff</th><td><span id="cutoff">-</span>:00 IST (same-day; Admin/HOD override after cutoff)</td></tr>
+            <tr><th style="width:42%">Current semester</th><td><span id="runtimeSemester">-</span></td></tr>
+            <tr><th>Staff marking cutoff</th><td><span id="cutoff">-</span>:00 IST, same day only</td></tr>
+            <tr><th>HOD / Admin correction</th><td><span id="runtimeCorrection">After cutoff until semester end date</span></td></tr>
             <tr><th>OD auto-reject</th><td>Last OD date 18:00 IST if not fully approved</td></tr>
             <tr><th>HOD cancel window</th><td>Until last OD date 23:59:59 IST</td></tr>
-            <tr><th>Manual attendance</th><td>Staff same-day before cutoff; Admin/HOD override within the semester end date</td></tr>
+            <tr><th>Future attendance</th><td>Always closed</td></tr>
           </table>
         </div>
       </div>
 
-      <div class="col-lg-5">
+      <div class="col-lg-4">
         <div class="card erp-card p-3 mb-3">
           <h5 class="erp-section-title mb-2">Admin Modules</h5>
           <div class="d-grid gap-2">
@@ -65,23 +98,35 @@
 {% block scripts %}
 <script>
 const f=document.getElementById('setForm');
-function msg(t,c='text-muted'){const e=document.getElementById('setMsg'); e.className='small mt-2 '+c; e.textContent=t;}
+function msg(t,c='text-muted'){const e=document.getElementById('setMsg'); e.className='small mb-0 '+c; e.textContent=t;}
+function applyRuntime(d){
+  const s=d.settings||{}; const r=d.runtime||{};
+  const cutoff=s.attendance_cutoff_hour||'18';
+  document.getElementById('cutoff').textContent=cutoff;
+  document.getElementById('runtimeSemester').textContent=r.semester_label||s.semester_label||'-';
+  const end=r.semester_end||s.semester_end||'';
+  document.getElementById('runtimeCorrection').textContent=end?`After ${cutoff}:00 IST until ${end}`: (r.hod_correction_note||'After cutoff until semester end date');
+  document.getElementById('runtimeNote').textContent=r.today_ist?`Effective as of ${r.today_ist} (IST).`:'Effective rules below.';
+}
 async function load(){
   try{
     const d=await erp.fetchJSON('/api/admin/settings'); const s=d.settings||{};
     f.semester_label.value=s.semester_label||''; f.semester_start.value=s.semester_start||''; f.semester_end.value=s.semester_end||'';
     f.defaulter_threshold.value=s.defaulter_threshold||'75'; f.enforce_calendar_holidays.value=s.enforce_calendar_holidays||'0';
     f.attendance_cutoff_hour.value=s.attendance_cutoff_hour||'18';
-    document.getElementById('cutoff').textContent=s.attendance_cutoff_hour||'18';
+    applyRuntime(d);
   }catch(e){ msg(e.message||'Could not load settings.','text-danger'); }
 }
 f.addEventListener('submit', async e=>{
   e.preventDefault(); msg('Saving...');
   const payload=Object.fromEntries(new FormData(f).entries());
   try{
+    const threshold=Number(payload.defaulter_threshold); const cutoff=Number(payload.attendance_cutoff_hour);
+    if(!Number.isFinite(threshold)||threshold<1||threshold>100) throw new Error('Defaulter threshold must be between 1 and 100.');
+    if(!Number.isFinite(cutoff)||cutoff<0||cutoff>23) throw new Error('Attendance cutoff hour must be between 0 and 23.');
     const d=await erp.fetchJSON('/api/admin/settings',{method:'POST',body:payload});
     msg('Saved.','text-success'); erp.toast('ERP settings saved','success');
-    if(d.settings) { document.getElementById('cutoff').textContent=d.settings.attendance_cutoff_hour||f.attendance_cutoff_hour.value; }
+    if(d.settings) applyRuntime({settings:{...d.settings,attendance_cutoff_hour:d.settings.attendance_cutoff_hour||f.attendance_cutoff_hour.value}});
     await load();
   }catch(err){ msg(err.message||'Save failed.','text-danger'); }
 });

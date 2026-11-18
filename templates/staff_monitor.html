@@ -3,7 +3,7 @@
 {% block content %}
   <div class="container">
     <div class="row g-4">
-      <div class="col-lg-5">
+      <div class="col-lg-8">
         <div class="card p-3 shadow-sm glass-card mb-3">
           <h5>Staff / HOD Options</h5>
           <p class="small text-muted mb-1">Logged in as: <strong>{{ (user.display_name if user else session.get('display_name')) or session.get('username') }}</strong>{% if user and user.is_hod %} <span class="badge bg-danger">HOD</span>{% endif %}{% if user and user.is_advisor %} <span class="badge bg-primary">Advisor {{ user.advisor_class }}</span>{% endif %}</p>
@@ -33,18 +33,6 @@
           </ul>
         </div>
       </div>
-
-      <div class="col-lg-7">
-        <div class="card p-3 shadow-sm glass-card">
-          <h5 class="mb-3">Recent Attendance (legacy feed)</h5>
-          <ul id="notificationList" class="list-group" style="max-height: 520px; overflow-y: auto;">
-            <li class="list-group-item text-muted">Loading...</li>
-          </ul>
-        </div>
-      </div>
     </div>
   </div>
-{% endblock %}
-{% block scripts %}
-<script src="{{ url_for('static', filename='js/staff_monitor.js') }}"></script>
 {% endblock %}

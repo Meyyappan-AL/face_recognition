@@ -1,6 +1,15 @@
 ﻿(function(){
   window.erp = window.erp || {};
   erp.esc = function(s){ return (s??'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); };
+  erp.repBadge = function(role){
+    var value=(role??'').toString().trim().toLowerCase();
+    return ['representative','rep','class representative','class rep'].indexOf(value)>=0 ? ' <span class="badge bg-primary" title="Representative">Rep</span>' : '';
+  };
+  erp.repText = function(role){
+    var value=(role??'').toString().trim().toLowerCase();
+    return ['representative','rep','class representative','class rep'].indexOf(value)>=0 ? 'Rep ' : '';
+  };
+
   erp.toast = function(msg, type){
     var host=document.getElementById('erpToastHost');
     if(!host){ host=document.createElement('div'); host.id='erpToastHost'; document.body.appendChild(host); }

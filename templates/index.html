@@ -1,8 +1,5 @@
 {% extends "base.html" %}
 {% block title %}Admin Dashboard{% endblock %}
-{% block head %}
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-{% endblock %}
 {% block content %}
   <div class="container">
     <div class="row g-4">
@@ -44,10 +41,6 @@
             <div class="progress" style="height:24px;"><div id="trainProgress" class="progress-bar" style="width:0%">0%</div></div>
             <div id="trainMsg" class="mt-2 text-muted small">Used by admin webcam/video face attendance. Manual attendance works without a trained model.</div>
           </div>
-        </div>
-        <div class="card p-3 shadow-sm glass-card">
-          <h5>Legacy Attendance (Last 30 days)</h5>
-          <div style="position:relative;height:300px;width:100%;"><canvas id="attendanceChart"></canvas></div>
         </div>
       </div>
     </div>

@@ -99,7 +99,7 @@ function render(){
     return `<tr data-sid="${s.id}">
       <td>${s.photo_url?`<img class="roster-photo" src="${s.photo_url}" alt="">`:`<div class="roster-photo d-inline-flex align-items-center justify-content-center text-muted small">N/A</div>`}</td>
       <td>${esc(s.reg_no||'-')}</td>
-      <td class="fw-semibold">${esc(s.name||'-')} ${notEditable?'<div class="text-danger small">Edit window closed</div>':''}${s.od_approved?'<div class="text-primary small">Day OD approved</div>':''}${s.medical_approved?'<div class="text-info small">Medical Leave approved</div>':''}</td>
+      <td class="fw-semibold">${erp.repBadge(s.student_role)}${esc(s.name||'-')} ${notEditable?'<div class="text-danger small">Edit window closed</div>':''}${s.od_approved?'<div class="text-primary small">Day OD approved</div>':''}${s.medical_approved?'<div class="text-info small">Medical Leave approved</div>':''}</td>
       <td>${esc(s.roll||'-')}</td>
       <td class="small text-muted">${esc(s.class||'')} ${esc(s.section||'')}<br>${esc(s.phone||'')} ${esc(s.email||'')}</td>
       <td class="small">${s.selected_elective?esc(s.selected_elective):'<span class="text-muted">-</span>'}</td>

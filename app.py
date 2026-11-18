@@ -20,6 +20,7 @@ from email.mime.text import MIMEText
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_file, abort, redirect, url_for, session, flash
 from werkzeug.utils import secure_filename
+from markupsafe import Markup
 from model import train_model_background, extract_embedding_for_image, load_model_if_exists, MODEL_PATH, predict_with_model, detect_faces_bboxes, crop_face_and_embed
 import hashlib
 import cv2
@@ -102,6 +103,25 @@ def _hash_pw(pw): return hashlib.sha256((pw or '').encode()).hexdigest()
 def _norm(s): return re.sub(r'\s+', ' ', (s or '').strip())
 def _upper(s): return _norm(s).upper()
 
+STUDENT_ROLE_PRESETS = ['Representative','Ambassador','Club Lead','Other']
+def _normalize_student_role(value):
+    role = _norm(value)
+    if not role:
+        return ''
+    if role.lower() in ('representative','rep','class representative','class rep'):
+        return 'Representative'
+    return role[:60]
+
+def _is_rep_role(value):
+    return _normalize_student_role(value).lower() == 'representative'
+
+def rep_badge(value):
+    if not _is_rep_role(value):
+        return Markup('')
+    return Markup('<span class="badge bg-primary ms-1" title="Representative">Rep</span>')
+
+app.jinja_env.globals['rep_badge'] = rep_badge
+
 def _normalize_dob(dob):
     dob = _norm(dob)
     if not dob: return ''
@@ -109,6 +129,60 @@ def _normalize_dob(dob):
         try: return datetime.datetime.strptime(dob, fmt).strftime('%Y-%m-%d')
         except Exception: pass
     return dob
+
+def _class_year_info(class_name):
+    text = _norm(class_name).upper()
+    match = re.match(r'^(\d{2})[A-Z]*(\d+)[A-Z0-9]*$', text)
+    if not match:
+        return '', ''
+    start = 2000 + int(match.group(1))
+    study = (int(match.group(2)) + 1) // 2
+    if study < 1 or study > 4:
+        study = ''
+    return f'{start}-{start + 4}', study
+
+def _normalize_batch_year(value):
+    value = _norm(value)
+    if not value:
+        return ''
+    match = re.fullmatch(r'(\d{4})\s*-\s*(\d{4})', value)
+    if not match:
+        return None
+    start, end = int(match.group(1)), int(match.group(2))
+    if end != start + 4:
+        return None
+    return f'{start}-{end}'
+
+def _normalize_study_year(value):
+    value = _norm(value)
+    if not value:
+        return ''
+    try:
+        year = int(float(value))
+    except Exception:
+        return None
+    return str(year) if 1 <= year <= 4 else None
+
+def _ensure_student_year_columns(c):
+    _ensure_column(c, 'students', 'batch_year', 'TEXT')
+    _ensure_column(c, 'students', 'study_year', 'INTEGER')
+
+def _ensure_student_role_column(c):
+    _ensure_column(c, 'students', 'student_role', 'TEXT')
+
+def _backfill_student_years(c):
+    _ensure_student_year_columns(c)
+    rows = c.execute('SELECT id,class,batch_year,study_year FROM students').fetchall()
+    for sid, cls, batch, study in rows:
+        derived_batch, derived_study = _class_year_info(cls)
+        updates, params = [], []
+        if (batch is None or str(batch).strip() == '') and derived_batch:
+            updates.append('batch_year=?'); params.append(derived_batch)
+        if (study is None or str(study).strip() == '') and derived_study:
+            updates.append('study_year=?'); params.append(int(derived_study))
+        if updates:
+            params.append(sid)
+            c.execute('UPDATE students SET ' + ','.join(updates) + ' WHERE id=?', params)
 
 def _staff_password(display_name):
     # password rule: name only (no Mr/Ms/Dr/initials), ALL CAPS
@@ -220,8 +294,9 @@ def init_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL, roll TEXT, class TEXT, section TEXT, reg_no TEXT, dob TEXT, created_at TEXT
                 )""")
-    for col,coldef in [('dob','TEXT'),('reg_no','TEXT'),('active','INTEGER DEFAULT 1'),('email','TEXT'),('phone','TEXT'),('gender','TEXT'),('blood_group','TEXT'),('guardian_name','TEXT'),('guardian_phone','TEXT'),('address','TEXT')]:
+    for col,coldef in [('dob','TEXT'),('reg_no','TEXT'),('active','INTEGER DEFAULT 1'),('email','TEXT'),('phone','TEXT'),('gender','TEXT'),('blood_group','TEXT'),('guardian_name','TEXT'),('guardian_phone','TEXT'),('address','TEXT'),('batch_year','TEXT'),('study_year','INTEGER'),('student_role','TEXT')]:
         _ensure_column(c,'students',col,coldef)
+    _backfill_student_years(c)
     c.execute("""CREATE TABLE IF NOT EXISTS attendance (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     student_id INTEGER, name TEXT, timestamp TEXT, source TEXT DEFAULT 'auto', marked_by TEXT
@@ -231,7 +306,7 @@ def init_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT NOT NULL, student_id INTEGER, created_at TEXT
                 )""")
-    for col,coldef in [('student_id','INTEGER'),('staff_code','TEXT'),('display_name','TEXT'),('is_hod','INTEGER DEFAULT 0'),('is_advisor','INTEGER DEFAULT 0'),('advisor_class','TEXT'),('dob','TEXT'),('phone','TEXT'),('email','TEXT'),('active','INTEGER DEFAULT 1')]:
+    for col,coldef in [('student_id','INTEGER'),('staff_code','TEXT'),('display_name','TEXT'),('is_hod','INTEGER DEFAULT 0'),('is_advisor','INTEGER DEFAULT 0'),('advisor_class','TEXT'),('dob','TEXT'),('phone','TEXT'),('email','TEXT'),('active','INTEGER DEFAULT 1'),('gender','TEXT'),('designation','TEXT'),('department','TEXT'),('qualification','TEXT'),('address','TEXT'),('date_of_joining','TEXT'),('deleted_at','TEXT')]:
         _ensure_column(c,'users',col,coldef)
     c.execute("""CREATE TABLE IF NOT EXISTS notifications (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -339,7 +414,11 @@ def init_db():
                     actor_role TEXT, actor_user TEXT, actor_name TEXT,
                     entity_type TEXT, entity_id TEXT, action TEXT,
                     old_value TEXT, new_value TEXT, details TEXT, ts TEXT
-                )""")
+                 )""")
+    for sql in ('CREATE INDEX IF NOT EXISTS idx_audit_ts ON attendance_audit_log(ts)',
+                'CREATE INDEX IF NOT EXISTS idx_audit_entity ON attendance_audit_log(entity_type, action)',
+                'CREATE INDEX IF NOT EXISTS idx_audit_actor ON attendance_audit_log(actor_user)'):
+        c.execute(sql)
     c.execute("""CREATE TABLE IF NOT EXISTS student_electives (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     student_id INTEGER NOT NULL, class_name TEXT NOT NULL,
@@ -634,15 +713,27 @@ def _resolve_student_for_user():
         except Exception: pass
     conn.close(); return None
 
+def _student_roles_map(student_ids):
+    ids = sorted({int(x) for x in student_ids if x})
+    if not ids:
+        return {}
+    conn = _db(); c = conn.cursor()
+    _ensure_student_role_column(c)
+    placeholders = ','.join('?' for _ in ids)
+    rows = c.execute(f'SELECT id,student_role FROM students WHERE id IN ({placeholders})', ids).fetchall()
+    conn.close()
+    return {int(r[0]): r[1] or '' for r in rows}
+
 def _student_profile_dict(student_id):
     conn=_db(); c=conn.cursor()
     for col in ['email','phone','gender','blood_group','guardian_name','guardian_phone','address']:
         _ensure_column(c,'students',col,'TEXT')
-    c.execute("""SELECT id,name,roll,class,section,reg_no,dob,email,phone,gender,blood_group,guardian_name,guardian_phone,address,active
+    _ensure_student_role_column(c)
+    c.execute("""SELECT id,name,roll,class,section,reg_no,dob,email,phone,gender,blood_group,guardian_name,guardian_phone,address,active,student_role
                  FROM students WHERE id=?""", (student_id,))
     r=c.fetchone(); conn.close()
     if not r: return None
-    keys=['id','name','roll','class','section','reg_no','dob','email','phone','gender','blood_group','guardian_name','guardian_phone','address','active']
+    keys=['id','name','roll','class','section','reg_no','dob','email','phone','gender','blood_group','guardian_name','guardian_phone','address','active','student_role']
     return dict(zip(keys, r))
 
 # ==============================================================================
@@ -749,7 +840,9 @@ def staff_monitor(): return render_template('staff_monitor.html', user=_current_
 def student_dashboard():
     student = _resolve_student_for_user(); info=None
     if student:
-        info = {"id":student[0],"name":student[1],"roll":student[2],"class":student[3],"section":student[4],"reg_no":student[5],"dob":student[7] if len(student)>7 else None}
+        profile = _student_profile_dict(student[0]) or {}
+        info = {"id":student[0],"name":student[1],"roll":student[2],"class":student[3],"section":student[4],"reg_no":student[5],"dob":student[7] if len(student)>7 else None,
+                "student_role":profile.get('student_role','')}
     return render_template('student_dashboard.html', student_info=info, user=_current_user())
 
 @app.route('/mark_attendance')
@@ -763,18 +856,29 @@ def mark_attendance_page():
 @app.route('/add_student', methods=['GET','POST'])
 @admin_required
 def add_student():
-    if request.method == 'GET': return render_template('add_student.html', classes=get_classes())
+    if request.method == 'GET': return render_template('add_student.html', classes=get_classes(), role_presets=STUDENT_ROLE_PRESETS)
     data = request.form
     name = _norm(data.get('name')); roll=_norm(data.get('roll')); cls=_norm(data.get('class')); sec=_norm(data.get('sec') or data.get('section'))
     reg_no=_upper(data.get('reg_no')); dob=_normalize_dob(data.get('dob'))
     email=_norm(data.get('email')); phone=_norm(data.get('phone')); gender=_norm(data.get('gender')); blood=_norm(data.get('blood_group'))
     guardian_name=_norm(data.get('guardian_name')); guardian_phone=_norm(data.get('guardian_phone')); address=_norm(data.get('address'))
+    role_value = data.get('student_role_custom') if _norm(data.get('student_role')) == 'Other' else data.get('student_role')
+    role = _normalize_student_role(role_value)
+    derived_batch, derived_study = _class_year_info(cls)
+    batch = _normalize_batch_year(data.get('batch_year')) or derived_batch
+    study = _normalize_study_year(data.get('study_year')) or derived_study
+    if _normalize_batch_year(data.get('batch_year')) is None:
+        return jsonify({'error':'Batch year must be in YYYY-YYYY format.'}), 400
+    if _normalize_study_year(data.get('study_year')) is None:
+        return jsonify({'error':'Study year must be between 1 and 4.'}), 400
     if not name: return jsonify({'error':'name required'}), 400
     if not reg_no or not dob: return jsonify({'error':'Register Number and DOB are required (student login = Reg No + DOB).'}), 400
     if cls and cls not in get_classes(): return jsonify({'error':f'Unknown class: {cls}'}), 400
     conn=_db(); c=conn.cursor()
     for col in ['email','phone','gender','blood_group','guardian_name','guardian_phone','address']:
         _ensure_column(c,'students',col,'TEXT')
+    _ensure_student_year_columns(c)
+    _ensure_student_role_column(c)
     # Duplicate prevention is keyed on Register Number (roll numbers are not unique/stable).
     c.execute('SELECT id,name,class,reg_no FROM students WHERE upper(trim(COALESCE(reg_no,"")))=?', (reg_no,))
     dup=c.fetchone()
@@ -786,9 +890,9 @@ def add_student():
     if u and u[1] != 'student':
         conn.close()
         return jsonify({'error':f'Login ID {reg_no} is already used by a {u[1]} account.'}), 409
-    c.execute('''INSERT INTO students (name,roll,class,section,reg_no,dob,email,phone,gender,blood_group,guardian_name,guardian_phone,address,created_at,active)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
-              (name,roll,cls,sec,reg_no,dob,email,phone,gender,blood,guardian_name,guardian_phone,address,datetime.datetime.utcnow().isoformat()))
+    c.execute('''INSERT INTO students (name,roll,class,section,reg_no,dob,email,phone,gender,blood_group,guardian_name,guardian_phone,address,batch_year,study_year,student_role,created_at,active)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)''',
+               (name,roll,cls,sec,reg_no,dob,email,phone,gender,blood,guardian_name,guardian_phone,address,batch,int(study) if study else None,role,datetime.datetime.utcnow().isoformat()))
     sid=c.lastrowid
     c.execute('SELECT id FROM users WHERE username=?',(reg_no,))
     if not c.fetchone():
@@ -798,7 +902,7 @@ def add_student():
         c.execute('UPDATE users SET student_id=?, display_name=?, dob=?, email=?, phone=?, active=1, password=? WHERE username=? AND role="student"', (sid,name,dob,email,phone,_hash_pw(dob),reg_no))
     conn.commit(); conn.close()
     os.makedirs(os.path.join(DATASET_DIR,str(sid)), exist_ok=True)
-    audit_log('student', sid, 'add', None, {'name':name,'reg_no':reg_no,'class':cls,'roll':roll}, details='Admin added student')
+    audit_log('student', sid, 'add', None, {'name':name,'reg_no':reg_no,'class':cls,'roll':roll,'batch_year':batch,'study_year':study,'student_role':role}, details='Admin added student')
     return jsonify({'student_id':sid, 'reg_no':reg_no})
 
 @app.route('/upload_face', methods=['POST'])
@@ -826,25 +930,89 @@ def upload_face():
 @staff_required
 def students_list():
     conn=_db(); c=conn.cursor()
-    c.execute('SELECT id,name,roll,class,section,reg_no,dob FROM students ORDER BY name ASC')
+    c.execute('SELECT id,name,roll,class,section,reg_no,dob,batch_year,study_year,student_role FROM students ORDER BY name ASC')
     rows=c.fetchall(); conn.close()
-    return jsonify({'students':[{'id':r[0],'name':r[1],'roll':r[2],'class':r[3],'section':r[4],'reg_no':r[5],'dob':r[6]} for r in rows]})
+    return jsonify({'students':[{'id':r[0],'name':r[1],'roll':r[2],'class':r[3],'section':r[4],'reg_no':r[5],'dob':r[6],'batch_year':r[7] or '', 'study_year':r[8] or '', 'student_role':r[9] or ''} for r in rows]})
 
 @app.route('/admin/students')
 @admin_required
 def admin_students_page():
     conn=_db(); c=conn.cursor()
     for col in ['email','phone','guardian_name','guardian_phone','address','blood_group','gender']: _ensure_column(c,'students',col,'TEXT')
-    c.execute('SELECT id,name,roll,class,section,reg_no,created_at,dob,email,phone,guardian_name,guardian_phone,active FROM students ORDER BY class,name,id DESC')
-    rows=c.fetchall(); conn.close()
+    _backfill_student_years(c)
+    _ensure_student_role_column(c)
+    c.execute('''SELECT id,name,roll,class,section,reg_no,created_at,dob,email,phone,guardian_name,guardian_phone,
+                        active,gender,batch_year,study_year,student_role
+                 FROM students ORDER BY class,name,id DESC''')
+    rows=c.fetchall(); conn.commit(); conn.close()
     students=[]
     for r in rows:
         folder=os.path.join(DATASET_DIR,str(r[0])); img_count=0
         if os.path.isdir(folder): img_count=len([f for f in os.listdir(folder) if f.lower().endswith(('.jpg','.jpeg','.png'))])
-        students.append({'id':r[0],'name':r[1],'roll':r[2],'class':r[3],'section':r[4],'reg_no':r[5],'created_at':r[6],'dob':r[7],
-                         'email':r[8] or '','phone':r[9] or '','guardian_name':r[10] or '','guardian_phone':r[11] or '',
-                         'active':r[12] if len(r)>12 else 1,'image_count':img_count})
+        students.append({'id':r[0],'name':r[1],'roll':r[2] or '','class':r[3] or '','section':r[4] or '',
+                         'reg_no':r[5] or '','created_at':r[6] or '','dob':r[7] or '',
+                         'email':r[8] or '','phone':r[9] or '','guardian_name':r[10] or '',
+                         'guardian_phone':r[11] or '','active':int(r[12] or 0),'gender':r[13] or '',
+                         'batch_year':r[14] or '','study_year':int(r[15] or 0) if r[15] else '',
+                         'student_role':r[16] or '','image_count':img_count})
     return render_template('students_list.html', students=students)
+
+@app.route('/admin/students/<int:sid>/attendance')
+@admin_required
+def admin_student_attendance(sid):
+    conn=_db(); c=conn.cursor()
+    _ensure_student_year_columns(c)
+    _ensure_student_role_column(c)
+    row=c.execute('SELECT id,name,class,section,reg_no,batch_year,study_year,gender,active,student_role FROM students WHERE id=?', (sid,)).fetchone()
+    if not row:
+        conn.close(); abort(404)
+    student={'id':row[0],'name':row[1],'class':row[2] or '','section':row[3] or '','reg_no':row[4] or '',
+             'batch_year':row[5] or '','study_year':row[6] or '','gender':row[7] or '','active':int(row[8] or 0),
+             'student_role':row[9] or ''}
+    semester_id=_norm(request.args.get('semester_id'))
+    date_from=_norm(request.args.get('from'))
+    date_to=_norm(request.args.get('to'))
+    status=_norm(request.args.get('status'))
+    period=_norm(request.args.get('period'))
+    where=['e.student_id=?']; params=[sid]
+    if semester_id:
+        sem=_semester_by_id(semester_id)
+        if sem:
+            win_from,win_to=_semester_window(sem,student['class'])
+            where.append('s.date>=?'); params.append(win_from.isoformat())
+            where.append('s.date<=?'); params.append(win_to.isoformat())
+    if date_from:
+        where.append('s.date>=?'); params.append(date_from)
+    if date_to:
+        where.append('s.date<=?'); params.append(date_to)
+    if status:
+        where.append('lower(e.status)=lower(?)'); params.append(status)
+    if period:
+        try:
+            where.append('s.period=?'); params.append(int(period))
+        except Exception:
+            period=''
+    rows=c.execute('''SELECT s.date,s.period,s.subject_display,s.class_name,e.status,e.marked_by,e.source,e.updated_at,s.submitted_at
+                      FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id
+                      WHERE ''' + ' AND '.join(where) + ' ORDER BY s.date DESC,s.period DESC,e.updated_at DESC LIMIT 1000', params).fetchall()
+    conn.close()
+    details=[]
+    total=credited=absent=0
+    for r in rows:
+        st=r[4] or ''
+        key=st.strip().lower()
+        total+=1
+        if key in ('present','late','od','medical leave'):
+            credited+=1
+        elif key in ('absent','n'):
+            absent+=1
+        details.append({'date':r[0] or '','period':r[1] or '', 'subject':r[2] or '', 'class':r[3] or '',
+                        'status':st,'marked_by':r[5] or '','source':r[6] or '','updated_at':r[7] or '','submitted_at':r[8] or ''})
+    summary={'total':total,'credited':credited,'absent':absent,
+             'percentage':round((credited/total*100) if total else 0,2)}
+    return render_template('admin_student_attendance.html', student=student, details=details, summary=summary,
+                           semesters=[_semester_json(s) for s in _semester_rows()], semester_id=semester_id,
+                           date_from=date_from, date_to=date_to, status=status, period=str(period) if period else '')
 
 # --- Admin: staff / HOD / advisor management ---
 @app.route('/admin/staff')
@@ -852,13 +1020,35 @@ def admin_students_page():
 def admin_staff_page():
     return render_template('admin_staff.html', classes=get_classes())
 
+STAFF_PROFILE_FIELDS = ('dob','gender','designation','department','qualification','address','date_of_joining','phone','email')
+
+def _bool_flag(value, default=False):
+    if value is None or value == '': return 1 if default else 0
+    return 1 if str(value).strip().lower() in ('1','true','on','yes','y') else 0
+
+def _staff_row_dict(row):
+    if row is None: return None
+    keys=['id','username','display_name','staff_code','role','is_hod','is_advisor','advisor_class','dob','gender','designation','department','qualification','address','date_of_joining','phone','email','active','deleted_at']
+    return dict(zip(keys,row))
+
+def _staff_profile_payload(data, code, display, advisor_class, is_hod, active):
+    return {
+        'username':code, 'staff_code':code, 'display_name':display, 'role':'staff',
+        'is_hod':is_hod, 'is_advisor':1 if advisor_class else 0, 'advisor_class':advisor_class or None,
+        'dob':_norm(data.get('dob')) or None, 'gender':_norm(data.get('gender')) or None,
+        'designation':_norm(data.get('designation')) or None, 'department':_norm(data.get('department')) or None,
+        'qualification':_norm(data.get('qualification')) or None, 'address':_norm(data.get('address')) or None,
+        'date_of_joining':_norm(data.get('date_of_joining')) or None,
+        'phone':_norm(data.get('phone')) or None, 'email':_norm(data.get('email')) or None,
+        'active':active,
+    }
+
 def _staff_rows():
     conn=_db(); c=conn.cursor()
-    c.execute("""SELECT id,username,display_name,staff_code,role,is_hod,is_advisor,advisor_class,phone,email,active
+    c.execute("""SELECT id,username,display_name,staff_code,role,is_hod,is_advisor,advisor_class,dob,gender,designation,department,qualification,address,date_of_joining,phone,email,active,deleted_at
                  FROM users WHERE role IN ('staff','hod','admin') AND username!='ADMIN' ORDER BY display_name COLLATE NOCASE""")
     rows=c.fetchall(); conn.close()
-    keys=['id','username','display_name','staff_code','role','is_hod','is_advisor','advisor_class','phone','email','active']
-    return [dict(zip(keys,r)) for r in rows]
+    return [_staff_row_dict(r) for r in rows]
 
 @app.route('/api/admin/staff', methods=['GET','POST'])
 @admin_required
@@ -871,30 +1061,38 @@ def api_admin_staff():
     display=_norm(data.get('display_name') or data.get('name'))
     if not code or not display: return jsonify({'ok':False,'error':'Staff code and display name are required.'}), 400
     if not re.fullmatch(r'[A-Z0-9._-]{1,20}', code): return jsonify({'ok':False,'error':'Staff code must be 1-20 letters/digits/._-'}), 400
-    phone=_norm(data.get('phone')); email=_norm(data.get('email'))
-    is_hod=1 if str(data.get('is_hod') or '0') in ('1','true','on','yes') or code==HOD_STAFF_CODE else 0
+    is_hod=1 if _bool_flag(data.get('is_hod')) or code==HOD_STAFF_CODE else 0
     advisor_class=_norm(data.get('advisor_class'))
     if advisor_class and advisor_class not in get_classes(): return jsonify({'ok':False,'error':'Unknown advisor class.'}), 400
-    active=0 if str(data.get('active','1')) in ('0','false','off','no') else 1
+    active=_bool_flag(data.get('active', 1), True)
     password=(data.get('password') or '').strip()
+    profile=_staff_profile_payload(data, code, display, advisor_class, is_hod, active)
     conn=_db(); c=conn.cursor()
-    c.execute('SELECT id,role FROM users WHERE upper(username)=?', (code,)); existing=c.fetchone()
-    if existing and existing[1]=='student':
+    c.execute("""SELECT id,username,display_name,staff_code,role,is_hod,is_advisor,advisor_class,dob,gender,designation,department,qualification,address,date_of_joining,phone,email,active,deleted_at
+                 FROM users WHERE upper(username)=?""", (code,)); existing_row=c.fetchone()
+    if existing_row and existing_row[4]=='student':
         conn.close(); return jsonify({'ok':False,'error':'This code is already used by a student login.'}), 409
     now=_now_iso()
-    if existing:
-        c.execute("""UPDATE users SET display_name=?,staff_code=?,role='staff',is_hod=?,is_advisor=?,advisor_class=?,phone=?,email=?,active=? WHERE id=?""",
-                  (display, code, is_hod, 1 if advisor_class else 0, advisor_class or None, phone, email, active, existing[0]))
-        uid=existing[0]; action='update'
+    if existing_row:
+        old=_staff_row_dict(existing_row)
+        deleted_at=old.get('deleted_at') if not active else None
+        c.execute("""UPDATE users SET username=?,staff_code=?,display_name=?,role='staff',is_hod=?,is_advisor=?,advisor_class=?,dob=?,gender=?,designation=?,department=?,qualification=?,address=?,date_of_joining=?,phone=?,email=?,active=?,deleted_at=? WHERE id=?""",
+                  (code, code, display, is_hod, 1 if advisor_class else 0, advisor_class or None,
+                   profile['dob'], profile['gender'], profile['designation'], profile['department'], profile['qualification'],
+                   profile['address'], profile['date_of_joining'], profile['phone'], profile['email'], active, deleted_at, existing_row[0]))
+        uid=existing_row[0]; action='update'
         if password: c.execute('UPDATE users SET password=? WHERE id=?', (_hash_pw(password), uid))
     else:
-        c.execute("""INSERT INTO users(username,password,role,staff_code,display_name,is_hod,is_advisor,advisor_class,phone,email,active,created_at)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (code, _hash_pw(password or _staff_password(display)), 'staff', code, display, is_hod, 1 if advisor_class else 0, advisor_class or None, phone, email, active, now))
-        uid=c.lastrowid; action='add'
-    c.execute('UPDATE users SET is_hod=0 WHERE is_hod=1 AND id!=?', (uid,)) if is_hod else None
+        c.execute("""INSERT INTO users(username,password,role,staff_code,display_name,is_hod,is_advisor,advisor_class,dob,gender,designation,department,qualification,address,date_of_joining,phone,email,active,created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (code, _hash_pw(password or _staff_password(display)), 'staff', code, display, is_hod, 1 if advisor_class else 0, advisor_class or None,
+                   profile['dob'], profile['gender'], profile['designation'], profile['department'], profile['qualification'],
+                   profile['address'], profile['date_of_joining'], profile['phone'], profile['email'], active, now))
+        uid=c.lastrowid; action='add'; old=None
+    if is_hod: c.execute('UPDATE users SET is_hod=0 WHERE is_hod=1 AND id!=?', (uid,))
     conn.commit(); conn.close()
-    audit_log('staff', uid, action, None, {'staff_code':code,'display_name':display,'is_hod':is_hod,'advisor_class':advisor_class,'active':active}, details='Admin managed staff account')
+    new={k:v for k,v in profile.items() if k!='username'}
+    audit_log('staff', uid, action, old, new, details='Admin managed staff account')
     return jsonify({'ok':True,'id':uid})
 
 @app.route('/api/admin/staff/<int:uid>/reset_password', methods=['POST'])
@@ -908,15 +1106,43 @@ def api_admin_staff_reset(uid):
     audit_log('staff', uid, 'reset_password', None, {'password_reset':True}, details='Admin reset staff password')
     return jsonify({'ok':True,'password':pw})
 
+def _set_staff_status(uid, active, deleted, action, details):
+    if session.get('user_id') == uid:
+        return jsonify({'ok':False,'error':'You cannot change your own account status.'}), 400
+    conn=_db(); c=conn.cursor()
+    c.execute("""SELECT id,username,display_name,staff_code,role,is_hod,is_advisor,advisor_class,dob,gender,designation,department,qualification,address,date_of_joining,phone,email,active,deleted_at
+                 FROM users WHERE id=? AND role IN ('staff','hod','admin') AND username!='ADMIN'""",(uid,))
+    r=c.fetchone()
+    if not r: conn.close(); return jsonify({'ok':False,'error':'Staff not found'}), 404
+    old=_staff_row_dict(r)
+    deleted_at=_now_iso() if deleted else (None if active else old.get('deleted_at'))
+    c.execute('UPDATE users SET active=?,deleted_at=? WHERE id=?',(1 if active else 0, deleted_at, uid))
+    conn.commit(); conn.close()
+    audit_log('staff', uid, action, {'active':old.get('active'),'deleted_at':old.get('deleted_at')}, {'active':1 if active else 0,'deleted_at':deleted_at}, details=details)
+    return jsonify({'ok':True,'active':1 if active else 0,'deleted':bool(deleted_at)})
+
+@app.route('/api/admin/staff/<int:uid>/deactivate', methods=['POST'])
+@admin_required
+def api_admin_staff_deactivate(uid):
+    return _set_staff_status(uid, False, False, 'deactivate', 'Admin deactivated staff account')
+
+@app.route('/api/admin/staff/<int:uid>/reactivate', methods=['POST'])
+@admin_required
+def api_admin_staff_reactivate(uid):
+    return _set_staff_status(uid, True, False, 'reactivate', 'Admin reactivated staff account')
+
+@app.route('/api/admin/staff/<int:uid>/delete', methods=['POST'])
+@admin_required
+def api_admin_staff_delete(uid):
+    return _set_staff_status(uid, False, True, 'delete', 'Admin archived staff account')
+
 @app.route('/api/admin/staff/<int:uid>/toggle', methods=['POST'])
 @admin_required
 def api_admin_staff_toggle(uid):
-    conn=_db(); c=conn.cursor(); c.execute('SELECT active FROM users WHERE id=? AND role IN ("staff","hod")',(uid,)); r=c.fetchone()
-    if not r: conn.close(); return jsonify({'ok':False,'error':'Staff not found'}), 404
-    active=0 if int(r[0] or 0)==1 else 1
-    c.execute('UPDATE users SET active=? WHERE id=?',(active,uid)); conn.commit(); conn.close()
-    audit_log('staff', uid, 'toggle_active', {'active':r[0]}, {'active':active}, details='Admin toggled staff account')
-    return jsonify({'ok':True,'active':active})
+    conn=_db(); c=conn.cursor(); c.execute('SELECT active,deleted_at FROM users WHERE id=? AND role IN ("staff","hod","admin") AND username!="ADMIN"',(uid,)); r=c.fetchone(); conn.close()
+    if not r: return jsonify({'ok':False,'error':'Staff not found'}), 404
+    if int(r[0] or 0)==1: return _set_staff_status(uid, False, False, 'deactivate', 'Admin deactivated staff account')
+    return _set_staff_status(uid, True, False, 'reactivate', 'Admin reactivated staff account')
 
 @app.route('/api/admin/staff/sync', methods=['POST'])
 @admin_required
@@ -945,18 +1171,19 @@ def api_admin_staff_import():
         conn=_db(); c=conn.cursor(); c.execute('SELECT id,role FROM users WHERE upper(username)=?',(code,)); ex=c.fetchone()
         if ex and ex[1]=='student':
             errors.append(f'Row {i}: {code} is a student login'); conn.close(); continue
-        is_hod=1 if str(row.get('is_hod') or '0') in ('1','true','yes','on') else 0
-        adv=_norm(row.get('advisor_class')); active=0 if str(row.get('active','1')) in ('0','false','no','off') else 1
+        is_hod=1 if _bool_flag(row.get('is_hod')) else 0
+        adv=_norm(row.get('advisor_class')); active=_bool_flag(row.get('active',1),True)
         pw=(row.get('password') or '').strip()
+        profile=_staff_profile_payload(row, code, display, adv, is_hod, active)
         if ex:
-            c.execute("""UPDATE users SET display_name=?,staff_code=?,role='staff',is_hod=?,is_advisor=?,advisor_class=?,phone=?,email=?,active=? WHERE id=?""",
-                      (display, code, is_hod, 1 if adv else 0, adv or None, _norm(row.get('phone')), _norm(row.get('email')), active, ex[0]))
+            c.execute("""UPDATE users SET display_name=?,staff_code=?,role='staff',is_hod=?,is_advisor=?,advisor_class=?,dob=?,gender=?,designation=?,department=?,qualification=?,address=?,date_of_joining=?,phone=?,email=?,active=?,deleted_at=CASE WHEN ?=1 THEN NULL ELSE deleted_at END WHERE id=?""",
+                      (display, code, is_hod, 1 if adv else 0, adv or None, profile['dob'], profile['gender'], profile['designation'], profile['department'], profile['qualification'], profile['address'], profile['date_of_joining'], profile['phone'], profile['email'], active, active, ex[0]))
             if pw: c.execute('UPDATE users SET password=? WHERE id=?',(_hash_pw(pw),ex[0]))
             updated+=1
         else:
-            c.execute("""INSERT INTO users(username,password,role,staff_code,display_name,is_hod,is_advisor,advisor_class,phone,email,active,created_at)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                      (code,_hash_pw(pw or _staff_password(display)),'staff',code,display,is_hod,1 if adv else 0,adv or None,_norm(row.get('phone')),_norm(row.get('email')),active,_now_iso()))
+            c.execute("""INSERT INTO users(username,password,role,staff_code,display_name,is_hod,is_advisor,advisor_class,dob,gender,designation,department,qualification,address,date_of_joining,phone,email,active,created_at)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                      (code,_hash_pw(pw or _staff_password(display)),'staff',code,display,is_hod,1 if adv else 0,adv or None,profile['dob'],profile['gender'],profile['designation'],profile['department'],profile['qualification'],profile['address'],profile['date_of_joining'],profile['phone'],profile['email'],active,_now_iso()))
             added+=1
         conn.commit(); conn.close()
     audit_log('staff','csv','import',None,{'added':added,'updated':updated,'errors':len(errors)},details='Admin imported staff CSV')
@@ -1558,8 +1785,8 @@ def api_admin_electives():
     if version and all(int(v.get('id') or 0)!=vid for v in versions):
         versions=[version]+versions
     conn=_db(); c=conn.cursor()
-    c.execute('SELECT id,name,reg_no,roll,class FROM students WHERE upper(class)=upper(?) ORDER BY name COLLATE NOCASE',(cls,))
-    students=[{'id':r[0],'name':r[1],'reg_no':r[2],'roll':r[3],'class':r[4]} for r in c.fetchall()]
+    c.execute('SELECT id,name,reg_no,roll,class,student_role FROM students WHERE upper(class)=upper(?) ORDER BY name COLLATE NOCASE',(cls,))
+    students=[{'id':r[0],'name':r[1],'reg_no':r[2],'roll':r[3],'class':r[4],'student_role':r[5] or ''} for r in c.fetchall()]
     conn.close()
     slots=_elective_slots_for_version(cls,version)
     details=_elective_map_details(cls,vid) if vid is not None else _elective_map_details(cls,None)
@@ -1820,8 +2047,9 @@ def _face_job_faces(job_id):
     conn = _db()
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        """SELECT * FROM face_attendance_faces WHERE job_id=?
-           ORDER BY CASE WHEN kind='student' THEN 0 ELSE 1 END, sample_count DESC, id""",
+        """SELECT f.*,s.student_role AS student_role FROM face_attendance_faces f
+           LEFT JOIN students s ON s.id=f.student_id WHERE f.job_id=?
+           ORDER BY CASE WHEN f.kind='student' THEN 0 ELSE 1 END, f.sample_count DESC, f.id""",
         (job_id,)
     ).fetchall()
     conn.close()
@@ -1843,9 +2071,9 @@ def _face_job_payload(job_id):
 
 def _face_roster_map(class_name):
     conn = _db(); c = conn.cursor()
-    c.execute("SELECT id,name,reg_no,roll FROM students WHERE upper(class)=upper(?) AND (active IS NULL OR active=1) ORDER BY roll,reg_no,name", (class_name,))
+    c.execute("SELECT id,name,reg_no,roll,student_role FROM students WHERE upper(class)=upper(?) AND (active IS NULL OR active=1) ORDER BY roll,reg_no,name", (class_name,))
     rows = c.fetchall(); conn.close()
-    return {int(r[0]): {'id': int(r[0]), 'name': r[1] or '', 'reg_no': r[2] or '', 'roll': r[3] or ''} for r in rows}
+    return {int(r[0]): {'id': int(r[0]), 'name': r[1] or '', 'reg_no': r[2] or '', 'roll': r[3] or '', 'student_role': r[4] or ''} for r in rows}
 
 
 def _face_validate_context(class_name, date_str, period):
@@ -2607,6 +2835,7 @@ def attendance_record():
         if absence=='none': return day_key not in absent_days
         return True
     session_rows=[r for r in session_rows if _keep_row(r)]
+    session_roles=_student_roles_map([r[10] for r in session_rows])
     agg={}
     for r in session_rows:
         key=(r[10],r[4],r[5],r[1])
@@ -2623,11 +2852,12 @@ def attendance_record():
         pct=round((pcount/tcount*100),1) if tcount else 0
         status='Present/OD' if pcount>0 else 'Absent'
         report_rows.append({'id':sid,'name':name,'reg_no':reg or '','class':cn or '','status':status,
+                            'student_role':session_roles.get(int(sid or 0),''),
                             'present':pcount,'absent':acount,'total':tcount,'pct':pct,
                             'first_in_fmt':'','last_out_fmt':'','duration':'','roll':reg or '','section':'','manual':f'{pcount} credited, {acount} absent, {pct}%'} )
     note='Period-session manual attendance (submitted sessions). Changes/overrides update attendance entries and are reflected in reports/student log. Missing exit never marks absent.'
     if session.get('role')!='admin': note+=' Staff view covers only sessions handled/submitted by you.'
-    return render_template('attendance_record.html', records=records, session_rows=session_rows, period=period, class_name=cls, report_rows=report_rows,
+    return render_template('attendance_record.html', records=records, session_rows=session_rows, session_roles=session_roles, period=period, class_name=cls, report_rows=report_rows,
                            semesters=[_semester_json(s) for s in _semester_rows()], semester_id=(sem or {}).get('id'), absence=absence,
                            summary={'total':total,'present':present,'absent':absent,'note':note})
 
@@ -2734,9 +2964,10 @@ def student_summary():
 @app.route('/notifications', methods=['GET'])
 @staff_required
 def get_notifications():
-    conn=_db(); c=conn.cursor(); c.execute('SELECT student_name,action,timestamp FROM notifications ORDER BY id DESC LIMIT 20')
+    conn=_db(); c=conn.cursor(); c.execute('SELECT student_id,student_name,action,timestamp FROM notifications ORDER BY id DESC LIMIT 20')
     rows=c.fetchall(); conn.close()
-    data=[{'name':r[0],'action':r[1],'timestamp':datetime.datetime.fromisoformat(r[2]).strftime('%Y-%m-%d %H:%M:%S') if r[2] else ''} for r in rows]
+    role_map=_student_roles_map([r[0] for r in rows])
+    data=[{'name':r[1],'student_role':role_map.get(int(r[0] or 0),''),'action':r[2],'timestamp':datetime.datetime.fromisoformat(r[3]).strftime('%Y-%m-%d %H:%M:%S') if r[3] else ''} for r in rows]
     return jsonify({'notifications':data})
 
 @app.route('/manual_attendance', methods=['POST'])
@@ -2836,9 +3067,10 @@ def profile_page():
     if session.get('role')!='student':
         conn=_db(); c=conn.cursor()
         for col in ['phone','email','display_name','staff_code','advisor_class']: _ensure_column(c,'users',col,'TEXT')
-        c.execute('SELECT username,display_name,staff_code,role,is_hod,is_advisor,advisor_class,phone,email FROM users WHERE id=?',(session.get('user_id'),))
+        c.execute('SELECT username,display_name,staff_code,role,is_hod,is_advisor,advisor_class,phone,email,dob,gender,designation,department,qualification,address,date_of_joining FROM users WHERE id=?',(session.get('user_id'),))
         r=c.fetchone(); conn.close()
-        if r: staff={'username':r[0],'display_name':r[1],'staff_code':r[2],'role':r[3],'is_hod':r[4],'is_advisor':r[5],'advisor_class':r[6],'phone':r[7] or '','email':r[8] or ''}
+        if r: staff={'username':r[0],'display_name':r[1],'staff_code':r[2],'role':r[3],'is_hod':r[4],'is_advisor':r[5],'advisor_class':r[6],'phone':r[7] or '','email':r[8] or '',
+                     'dob':r[9] or '','gender':r[10] or '','designation':r[11] or '','department':r[12] or '','qualification':r[13] or '','address':r[14] or '','date_of_joining':r[15] or ''}
     return render_template('profile.html', user=_current_user(), student=student, staff=staff)
 
 @app.route('/api/profile/save', methods=['POST'])
@@ -2916,7 +3148,7 @@ def api_attendance_roster():
         c.execute("SELECT DISTINCT student_id FROM medical_records WHERE class_name=? AND date=? AND period=? AND status='Medical Leave'", (cls,date,period))
         for r in c.fetchall(): approved_medical.add(int(r[0]))
     except Exception: pass
-    c.execute('SELECT id,name,roll,class,section,reg_no,dob,phone,email,guardian_name,guardian_phone FROM students WHERE upper(class)=upper(?) AND (active IS NULL OR active=1) ORDER BY roll, reg_no, name',(cls,))
+    c.execute('SELECT id,name,roll,class,section,reg_no,dob,phone,email,guardian_name,guardian_phone,student_role FROM students WHERE upper(class)=upper(?) AND (active IS NULL OR active=1) ORDER BY roll, reg_no, name',(cls,))
     rows=c.fetchall(); conn.close()
     is_subject=_is_assigned_staff(cls,date,period)
     emaps=_elective_lookup() if cell.get('options') else {}
@@ -2935,6 +3167,7 @@ def api_attendance_roster():
         students.append({'id':r[0],'name':r[1],'roll':r[2],'class':r[3],'section':r[4],'reg_no':r[5],'dob':r[6],
                          'phone':(r[7] if len(r)>7 else '') or '','email':(r[8] if len(r)>8 else '') or '',
                          'guardian_name':(r[9] if len(r)>9 else '') or '','guardian_phone':(r[10] if len(r)>10 else '') or '',
+                         'student_role':(r[11] if len(r)>11 else '') or '',
                          'photo_url':f'/student_photo_safe/{r[0]}' if _student_photo_path(r[0]) else None,
                          'selected_elective':elective,'effective_subject':elective or disp,
                          'default_status':'Absent','status':st,'locked_absent':locked_absent,'locked_od':locked_od,'od_approved':od_approved,
@@ -4273,10 +4506,12 @@ def api_od_pending():
     else:
         conn.close(); return jsonify({'ok':True,'requests':[],'viewer_role':'staff','note':'Only the class advisor and HOD can review OD requests. For a single handled period, consent/handling staff can assign OD directly in Take Attendance.'})
     rows=c.fetchall(); conn.close()
+    role_map=_student_roles_map([r[1] for r in rows])
     keys=['id','student_id','reg_no','student_name','class_name','from_date','to_date','day_wise','periods_json','reason','status','proof_name','advisor_decision','advisor_note','hod_decision','hod_note','created_at','advisor_code']
     reqs=[]
     for r in rows:
         d=dict(zip(keys,r))
+        d['student_role']=role_map.get(int(r[1] or 0),'')
         acts=[]
         if viewer_role=='advisor' and d['status']=='pending_advisor' and d['class_name']==adv_class:
             acts=['advisor_approve','advisor_reject']
@@ -4856,11 +5091,13 @@ def api_medical_pending():
         conn.close()
         return jsonify({'ok': True, 'requests': [], 'viewer_role': 'staff', 'note': 'Only the class advisor and HOD can review medical leave requests.'})
     rows = c.fetchall(); conn.close()
+    role_map = _student_roles_map([r[1] for r in rows])
     keys = ['id','student_id','reg_no','student_name','class_name','semester_id','from_date','to_date','day_wise','periods_json','reason','status',
             'certificate_name','advisor_decision','advisor_note','hod_decision','hod_note','created_at','advisor_code']
     reqs = []
     for row in rows:
         item = dict(zip(keys, row))
+        item['student_role'] = role_map.get(int(row[1] or 0), '')
         actions = []
         if viewer_role == 'advisor' and item['status'] == 'pending_advisor' and item['class_name'] == adv_class:
             actions = ['advisor_approve', 'advisor_reject']
@@ -5007,11 +5244,13 @@ def api_medical_history():
     except Exception:
         pass
     conn.close()
+    role_map = _student_roles_map([r[1] for r in rows])
     keys = ['id','student_id','reg_no','student_name','class_name','semester_id','from_date','to_date','day_wise','periods_json','reason','status',
             'advisor_decision','advisor_note','hod_decision','hod_note','certificate_name','created_at','updated_at']
     out = []
     for row in rows:
         item = dict(zip(keys, row))
+        item['student_role'] = role_map.get(int(row[1] or 0), '')
         item['hod_decision_display'] = _medical_hod_display(item)
         item['status_label'] = _medical_status_label(item.get('status'))
         out.append(item)
@@ -5044,6 +5283,8 @@ def download_period_csv():
 def admin_edit_student(sid):
     conn=_db(); c=conn.cursor()
     for col in ['email','phone','gender','blood_group','guardian_name','guardian_phone','address']: _ensure_column(c,'students',col,'TEXT')
+    _ensure_student_year_columns(c)
+    _ensure_student_role_column(c)
     c.execute('SELECT id FROM students WHERE id=?',(sid,))
     if not c.fetchone():
         conn.close(); abort(404)
@@ -5052,6 +5293,13 @@ def admin_edit_student(sid):
         name=_norm(data.get('name')); roll=_norm(data.get('roll')); cls=_norm(data.get('class')); sec=_norm(data.get('sec') or data.get('section'))
         reg_no=_upper(data.get('reg_no')); dob=_normalize_dob(data.get('dob'))
         email=_norm(data.get('email')); phone=_norm(data.get('phone'))
+        role_value = data.get('student_role_custom') if _norm(data.get('student_role')) == 'Other' else data.get('student_role')
+        role = _normalize_student_role(role_value)
+        derived_batch, derived_study = _class_year_info(cls)
+        batch = _normalize_batch_year(data.get('batch_year')) or derived_batch
+        study = _normalize_study_year(data.get('study_year')) or derived_study
+        if _normalize_batch_year(data.get('batch_year')) is None or _normalize_study_year(data.get('study_year')) is None:
+            conn.close(); flash('Batch year must be YYYY-YYYY and study year must be 1-4.','danger'); return redirect(url_for('admin_edit_student',sid=sid))
         if not name: conn.close(); flash('Student name is required.','danger'); return redirect(url_for('admin_edit_student',sid=sid))
         if not reg_no or not dob: conn.close(); flash('Register Number and DOB are required for student login.','danger'); return redirect(url_for('admin_edit_student',sid=sid))
         if cls and cls not in get_classes():
@@ -5065,9 +5313,11 @@ def admin_edit_student(sid):
         other=c.fetchone()
         if other:
             conn.close(); flash(f'Login ID {reg_no} is already used by another {other[1]} account.','danger'); return redirect(url_for('admin_edit_student',sid=sid))
-        c.execute('UPDATE students SET name=?,roll=?,class=?,section=?,reg_no=?,dob=?,email=?,phone=?,gender=?,blood_group=?,guardian_name=?,guardian_phone=?,address=? WHERE id=?',
+        c.execute('''UPDATE students SET name=?,roll=?,class=?,section=?,reg_no=?,dob=?,email=?,phone=?,gender=?,blood_group=?,
+                            guardian_name=?,guardian_phone=?,address=?,batch_year=?,study_year=?,student_role=? WHERE id=?''',
                   (name,roll,cls,sec,reg_no,dob,email,phone,_norm(data.get('gender')),_norm(data.get('blood_group')),
-                   _norm(data.get('guardian_name')),_norm(data.get('guardian_phone')),_norm(data.get('address')),sid))
+                   _norm(data.get('guardian_name')),_norm(data.get('guardian_phone')),_norm(data.get('address')),
+                   batch,int(study) if study else None,role,sid))
         if u:
             c.execute('UPDATE users SET username=?,display_name=?,dob=?,password=?,email=?,phone=?,active=1 WHERE id=?',
                       (reg_no,name,dob,_hash_pw(dob),email,phone,u[0]))
@@ -5075,14 +5325,18 @@ def admin_edit_student(sid):
             c.execute('INSERT INTO users (username,password,role,student_id,display_name,dob,email,phone,active,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
                       (reg_no,_hash_pw(dob),'student',sid,name,dob,email,phone,1,datetime.datetime.utcnow().isoformat()))
         conn.commit(); conn.close()
-        audit_log('student', sid, 'edit', None, {'name':name,'reg_no':reg_no,'class':cls,'roll':roll}, details='Admin edited student')
+        audit_log('student', sid, 'edit', None, {'name':name,'reg_no':reg_no,'class':cls,'roll':roll,'batch_year':batch,'study_year':study,'student_role':role}, details='Admin edited student')
         flash('Student updated. Student login password was reset to DOB.','success')
         return redirect(url_for('admin_students_page'))
-    c.execute('SELECT id,name,roll,class,section,reg_no,created_at,dob,email,phone,gender,blood_group,guardian_name,guardian_phone,address,active FROM students WHERE id=?',(sid,))
+    c.execute('''SELECT id,name,roll,class,section,reg_no,created_at,dob,email,phone,gender,blood_group,guardian_name,
+                        guardian_phone,address,active,batch_year,study_year,student_role FROM students WHERE id=?''',(sid,))
     r=c.fetchone(); conn.close()
     if not r: abort(404)
-    keys=['id','name','roll','class','section','reg_no','created_at','dob','email','phone','gender','blood_group','guardian_name','guardian_phone','address','active']
-    return render_template('edit_student.html', student=dict(zip(keys,r)), classes=get_classes())
+    keys=['id','name','roll','class','section','reg_no','created_at','dob','email','phone','gender','blood_group','guardian_name','guardian_phone','address','active','batch_year','study_year','student_role']
+    student=dict(zip(keys,r))
+    student['batch_year']=student.get('batch_year') or _class_year_info(student.get('class'))[0]
+    student['study_year']=student.get('study_year') or _class_year_info(student.get('class'))[1]
+    return render_template('edit_student.html', student=student, classes=get_classes(), role_presets=STUDENT_ROLE_PRESETS)
 
 @app.route('/reports')
 @staff_required
@@ -5121,10 +5375,12 @@ def api_od_history():
         c.execute("SELECT status,count(*) FROM od_requests"+scope_wh+" GROUP BY status", scope_params); counts={r[0]:r[1] for r in c.fetchall()}
     except Exception: pass
     conn.close()
+    role_map=_student_roles_map([r[1] for r in rows])
     keys=['id','student_id','reg_no','student_name','class_name','from_date','to_date','day_wise','periods_json','reason','status','advisor_decision','advisor_note','hod_decision','hod_note','proof_name','created_at','updated_at']
     out=[]
     for r in rows:
         d=dict(zip(keys,r))
+        d['student_role']=role_map.get(int(r[1] or 0),'')
         d['hod_decision_display']=_od_hod_display(d)
         if d['status']=='pending_advisor': d['status_label']='Pending Advisor'
         elif d['status']=='advisor_approved': d['status_label']='Awaiting HOD'
@@ -5142,7 +5398,18 @@ def api_admin_settings():
         keys=list(ERP_DEFAULTS.keys())+['attendance_cutoff_hour']
         vals={k:get_setting(k, ERP_DEFAULTS.get(k)) for k in keys}
         vals['attendance_cutoff_hour']=str(get_setting('attendance_cutoff_hour', ATTENDANCE_CUTOFF_HOUR))
-        return jsonify({'ok':True,'settings':vals})
+        sem=_current_semester() or {}
+        groups=[
+            {'title':'Academic & semester','description':'Mirrors the current semester. Use Semester Management for multiple semesters.','fields':['semester_label','semester_start','semester_end']},
+            {'title':'Attendance policy','description':'Controls defaulter reporting and the staff same-day marking cutoff.','fields':['defaulter_threshold','attendance_cutoff_hour']},
+            {'title':'Calendar enforcement','description':'Choose whether calendar holidays block staff submissions.','fields':['enforce_calendar_holidays']},
+        ]
+        runtime={'today_ist':_today_ist_str(),'semester_label':sem.get('label') or vals.get('semester_label',''),
+                 'semester_start':sem.get('start_date') or vals.get('semester_start',''),
+                 'semester_end':sem.get('end_date') or vals.get('semester_end',''),
+                 'attendance_cutoff_hour':vals['attendance_cutoff_hour'],
+                 'hod_correction_note':'HOD/Admin may correct after cutoff until the semester end date; future dates stay closed.'}
+        return jsonify({'ok':True,'settings':vals,'groups':groups,'runtime':runtime})
     data=request.get_json(silent=True) or request.form.to_dict()
     who=session.get('display_name') or session.get('username')
     changed={}
@@ -5422,6 +5689,7 @@ def api_analytics_insights():
     except Exception:
         rows=[]
     conn.close()
+    roles=_student_roles_map([r[1] for r in rows])
     items=[]
     for r in rows:
         try: per=int(r[6] or 0)
@@ -5430,8 +5698,9 @@ def api_analytics_insights():
         except Exception: dur=60
         items.append({'entry_id':r[0],'student_id':r[1],'student_name':r[2] or '','reg_no':r[3] or '',
                       'class_name':r[4] or '','date':r[5] or '','period':per,'subject':r[7] or '',
-                      'status':r[8] or '','status_key':_analytics_status_key(r[8]),
-                      'elective_label':r[9] or '','staff_code':(r[10] or '').strip(),
+                       'status':r[8] or '','status_key':_analytics_status_key(r[8]),
+                       'student_role':roles.get(int(r[1] or 0),''),
+                       'elective_label':r[9] or '','staff_code':(r[10] or '').strip(),
                       'staff_name':(r[11] or '').strip(),'duration':dur,'source':r[13] or ''})
     by_day={}
     for it in items:
@@ -5456,7 +5725,7 @@ def api_analytics_insights():
         _analytics_add(totals,it)
         sid=it['student_id']
         sb=student_buckets.setdefault(sid,{'student_id':sid,'name':it['student_name'],'reg_no':it['reg_no'],
-                                           'class':it['class_name'],'metrics':_analytics_blank()})
+                                           'student_role':it.get('student_role',''),'class':it['class_name'],'metrics':_analytics_blank()})
         sb['name']=it['student_name'] or sb['name']; sb['reg_no']=it['reg_no'] or sb['reg_no']; sb['class']=it['class_name'] or sb['class']
         _analytics_add(sb['metrics'],it)
         cn=it['class_name'] or 'Unassigned'
@@ -5491,7 +5760,7 @@ def api_analytics_insights():
     elif mode=='staff': compare_rows=staff_rows
     elif mode=='period': compare_rows=period_rows
     else:
-        compare_rows=[{'key':str(s['student_id']),'label':s['name'],'sub':(s['reg_no'] or '')+(' - '+s['class'] if s['class'] else ''),
+        compare_rows=[{'key':str(s['student_id']),'label':(('Rep ' if _is_rep_role(s.get('student_role')) else '')+(s['name'] or '')),'sub':(s['reg_no'] or '')+(' - '+s['class'] if s['class'] else ''),
                        **{k:s[k] for k in ('present','absent','late','od','medical','other','total','credited','absent_minutes','percentage','absent_hours','defaulter')}} for s in students]
     compare_rows.sort(key=lambda x:(x.get('percentage') or 0, x.get('total') or 0, x.get('label') or ''), reverse=True)
     totals=_analytics_finalize(totals)
@@ -5515,17 +5784,35 @@ def admin_audit_page():
 @admin_required
 def api_admin_audit():
     q=(request.args.get('q') or '').strip(); etype=(request.args.get('entity') or '').strip(); action=(request.args.get('action') or '').strip()
+    actor=(request.args.get('actor') or '').strip(); date_from=(request.args.get('from') or '').strip(); date_to=(request.args.get('to') or '').strip()
     try: limit=max(1,min(int(request.args.get('limit') or 200),1000))
     except Exception: limit=200
+    try: offset=max(0,int(request.args.get('offset') or 0))
+    except Exception: offset=0
     where=[]; params=[]
-    if q: where.append('(upper(actor_name) LIKE ? OR upper(actor_user) LIKE ? OR upper(entity_type) LIKE ? OR upper(action) LIKE ? OR entity_id=?)'); params += ['%'+q.upper()+'%']*4 + [q]
+    if q:
+        where.append('(upper(actor_name) LIKE ? OR upper(actor_user) LIKE ? OR upper(entity_type) LIKE ? OR upper(action) LIKE ? OR upper(CAST(entity_id AS TEXT)) LIKE ? OR upper(old_value) LIKE ? OR upper(new_value) LIKE ? OR upper(details) LIKE ?)')
+        params += ['%'+q.upper()+'%']*8
     if etype: where.append('entity_type=?'); params.append(etype)
     if action: where.append('action=?'); params.append(action)
+    if actor: where.append('(upper(actor_name)=upper(?) OR upper(actor_user)=upper(?))'); params += [actor,actor]
+    if date_from: where.append('date(ts)>=?'); params.append(date_from)
+    if date_to: where.append('date(ts)<=?'); params.append(date_to)
     wh=(' WHERE '+' AND '.join(where)) if where else ''
-    conn=_db(); c=conn.cursor(); c.execute('SELECT id,actor_role,actor_user,actor_name,entity_type,entity_id,action,old_value,new_value,details,ts FROM attendance_audit_log'+wh+' ORDER BY id DESC LIMIT ?', params+[limit])
-    rows=c.fetchall(); conn.close()
+    conn=_db(); c=conn.cursor()
+    c.execute('SELECT count(*) FROM attendance_audit_log'+wh, params)
+    total=c.fetchone()[0]
+    c.execute('SELECT id,actor_role,actor_user,actor_name,entity_type,entity_id,action,old_value,new_value,details,ts FROM attendance_audit_log'+wh+' ORDER BY id DESC LIMIT ? OFFSET ?', params+[limit,offset])
+    rows=c.fetchall()
+    facets={}
+    for key,col in (('entities','entity_type'),('actions','action'),('actors','actor_name')):
+        try:
+            c.execute(f'SELECT DISTINCT {col} FROM attendance_audit_log WHERE {col} IS NOT NULL AND {col}!="" ORDER BY {col} COLLATE NOCASE')
+            facets[key]=[r[0] for r in c.fetchall()]
+        except Exception: facets[key]=[]
+    conn.close()
     keys=['id','actor_role','actor_user','actor_name','entity_type','entity_id','action','old_value','new_value','details','ts']
-    return jsonify({'ok':True,'logs':[dict(zip(keys,r)) for r in rows]})
+    return jsonify({'ok':True,'logs':[dict(zip(keys,r)) for r in rows],'total':total,'returned':len(rows),'limit':limit,'offset':offset,'facets':facets})
 
 @app.route('/download_defaulters_csv')
 @staff_required

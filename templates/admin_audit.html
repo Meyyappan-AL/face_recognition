@@ -1,35 +1,142 @@
 ﻿{% extends "base.html" %}
 {% block title %}Audit Log{% endblock %}
+{% block head %}
+  <style>
+    .audit-value{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.72rem;white-space:pre-wrap;word-break:break-word;max-width:260px}
+    .audit-key{color:#6c757d}
+    .audit-details{white-space:pre-wrap;word-break:break-word;max-width:260px}
+    .audit-filter{max-width:190px}
+  </style>
+{% endblock %}
 {% block content %}
-  <div class="container-fluid px-0" style="max-width:1200px">
-    <div class="card erp-card p-3 mb-3">
-      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-        <div><h5 class="erp-section-title">Attendance / OD / Settings audit trail</h5><div class="erp-muted">Records key ERP actions (who/what/when). New actions are appended automatically.</div></div>
-        <div class="d-flex gap-2 flex-wrap">
-          <input id="fq" class="form-control form-control-sm" style="width:auto" placeholder="Search actor/entity/action">
-          <select id="fe" class="form-select form-select-sm" style="width:auto"><option value="">All entities</option><option>attendance_session</option><option>od_request</option><option>app_settings</option></select>
-          <button id="apply" class="btn btn-primary btn-sm">Apply</button>
-        </div>
+  <div class="container-fluid px-0" style="max-width:1500px">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+      <div>
+        <h4 class="erp-section-title mb-1">Audit Log</h4>
+        <div class="erp-muted">Searchable trail of attendance, student, staff, settings, approvals, timetable, and elective changes. Times are stored in UTC.</div>
       </div>
+      <div class="small text-muted" id="auditCount">-</div>
+    </div>
+
+    <div class="card erp-card p-3 mb-3">
+      <form id="auditFilters" class="row g-2 align-items-end">
+        <div class="col-md-4"><label class="form-label small mb-1">Search</label><input id="fq" class="form-control form-control-sm" placeholder="Actor, entity, action, details or value"></div>
+        <div class="col-md-2"><label class="form-label small mb-1">Entity</label><select id="fe" class="form-select form-select-sm"><option value="">All entities</option></select></div>
+        <div class="col-md-2"><label class="form-label small mb-1">Action</label><select id="fa" class="form-select form-select-sm"><option value="">All actions</option></select></div>
+        <div class="col-md-2"><label class="form-label small mb-1">Actor</label><select id="factor" class="form-select form-select-sm"><option value="">All actors</option></select></div>
+        <div class="col-md-1"><label class="form-label small mb-1">From</label><input id="ffrom" type="date" class="form-control form-control-sm"></div>
+        <div class="col-md-1"><label class="form-label small mb-1">To</label><input id="fto" type="date" class="form-control form-control-sm"></div>
+        <div class="col-12 d-flex gap-2 flex-wrap align-items-center">
+          <button id="apply" class="btn btn-primary btn-sm" type="submit">Apply filters</button>
+          <button id="clear" class="btn btn-outline-secondary btn-sm" type="button">Clear</button>
+          <select id="flimit" class="form-select form-select-sm audit-filter">
+            <option value="50">50 rows</option><option value="200" selected>200 rows</option><option value="500">500 rows</option><option value="1000">1000 rows</option>
+          </select>
+        </div>
+      </form>
+    </div>
+
+    <div class="card erp-card p-3">
       <div class="erp-table-wrap" style="max-height:70vh">
-        <table class="table table-sm erp-table mb-0"><thead><tr><th>#</th><th>Time (UTC)</th><th>Actor</th><th>Role</th><th>Entity</th><th>Action</th><th>Details / New value</th></tr></thead><tbody id="auditBody"><tr><td colspan="7" class="erp-empty">Loading...</td></tr></tbody></table>
+        <table class="table table-sm erp-table mb-0">
+          <thead><tr><th>#</th><th>Time (UTC)</th><th>Actor</th><th>Role</th><th>Entity</th><th>Action</th><th>Old value</th><th>New value</th><th>Details</th></tr></thead>
+          <tbody id="auditBody"><tr><td colspan="9" class="erp-empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3">
+        <div class="small text-muted" id="auditPage">-</div>
+        <div class="d-flex gap-2"><button id="prevPage" class="btn btn-outline-secondary btn-sm" type="button">Previous</button><button id="nextPage" class="btn btn-outline-secondary btn-sm" type="button">Next</button></div>
       </div>
     </div>
   </div>
 {% endblock %}
 {% block scripts %}
 <script>
-const $=id=>document.getElementById(id);
-function esc(s){return (s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
-async function load(){
-  const p=new URLSearchParams(); if($('fq').value.trim()) p.set('q',$('fq').value.trim()); if($('fe').value) p.set('entity',$('fe').value);
-  $('auditBody').innerHTML='<tr><td colspan="7" class="erp-empty">Loading...</td></tr>';
-  try{
-    const d=await fetch('/api/admin/audit?'+p.toString()).then(r=>r.json());
-    const rows=d.logs||[];
-    $('auditBody').innerHTML=rows.length?rows.map(x=>`<tr><td>${x.id}</td><td class="small text-muted">${esc((x.ts||'').slice(0,19).replace('T',' '))}</td><td>${esc(x.actor_name||x.actor_user||'-')}</td><td class="small">${esc(x.actor_role||'')}</td><td class="small">${esc(x.entity_type||'')}${x.entity_id?' #'+esc(x.entity_id):''}</td><td><span class="badge bg-secondary">${esc(x.action||'')}</span></td><td class="small">${esc(x.details||'')}${x.new_value?`<div class="text-muted">${esc(x.new_value)}</div>`:''}</td></tr>`).join(''):'<tr><td colspan="7" class="erp-empty">No audit entries yet. Submit attendance / OD / settings to populate.</td></tr>';
-  }catch(e){ $('auditBody').innerHTML='<tr><td colspan="7" class="text-danger small">Could not load audit log.</td></tr>'; }
-}
-$('apply').addEventListener('click', load); load();
+(function(){
+  const $=id=>document.getElementById(id);
+  const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  let offset=0, total=0, limit=200;
+
+  function actionClass(action){
+    const a=(action||'').toLowerCase();
+    if(/delete|remove|cancel|reject|reset_password|stop/.test(a)) return 'bg-danger';
+    if(/add|create|import|approve|save|version_save|upload|complete|restore/.test(a)) return 'bg-success';
+    if(/update|edit|settings|assign|process|submit|start|review|forward/.test(a)) return 'bg-warning text-dark';
+    return 'bg-secondary';
+  }
+  function prettyValue(raw){
+    if(raw===null||raw===undefined||raw==='') return '<span class="text-muted">-</span>';
+    let value=raw;
+    try{ value=JSON.parse(raw); }catch(e){ return `<div class="audit-value">${esc(raw)}</div>`; }
+    if(value===null||typeof value!=='object'){ return `<div class="audit-value">${esc(value)}</div>`; }
+    const entries=Array.isArray(value)?value.map((v,i)=>[String(i),v]):Object.entries(value);
+    if(!entries.length) return '<span class="text-muted">-</span>';
+    const body=entries.map(([k,v])=>`<div><span class="audit-key">${esc(k)}:</span> ${esc(typeof v==='object'?JSON.stringify(v):v)}</div>`).join('');
+    return `<details class="audit-value"><summary>${entries.length} field${entries.length===1?'':'s'}</summary><div class="mt-1">${body}</div></details>`;
+  }
+  function syncUrl(){
+    const p=new URLSearchParams();
+    const values={q:$('fq').value.trim(),entity:$('fe').value,action:$('fa').value,actor:$('factor').value,from:$('ffrom').value,to:$('fto').value,limit:String(limit),offset:String(offset)};
+    Object.entries(values).forEach(([k,v])=>{ if(v&&!(k==='offset'&&v==='0')&&!(k==='limit'&&v==='200')) p.set(k,v); });
+    history.replaceState(null,'',location.pathname+(p.toString()?'?'+p.toString():''));
+  }
+  function readUrl(){
+    const p=new URLSearchParams(location.search);
+    $('fq').value=p.get('q')||''; $('fe').value=p.get('entity')||''; $('fa').value=p.get('action')||''; $('factor').value=p.get('actor')||'';
+    $('ffrom').value=p.get('from')||''; $('fto').value=p.get('to')||'';
+    limit=Math.max(1,Math.min(1000,Number(p.get('limit')||200)||200)); offset=Math.max(0,Number(p.get('offset')||0)||0);
+    $('flimit').value=String([50,200,500,1000].includes(limit)?limit:200);
+  }
+  function renderFacets(facets){
+    const fill=(id,values,allLabel,extra)=>{
+      const el=$(id); const current=el.value; const opts=[`<option value="">${allLabel}</option>`].concat((extra||[]).concat(values||[]).filter((v,i,a)=>v&&a.indexOf(v)===i).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`));
+      el.innerHTML=opts.join(''); el.value=current;
+    };
+    fill('fe',facets.entities,'All entities',['attendance_session','od_request','app_settings','electives']);
+    fill('fa',facets.actions,'All actions');
+    fill('factor',facets.actors,'All actors');
+  }
+  async function load(loadFacets=false){
+    const p=new URLSearchParams();
+    const q=$('fq').value.trim(); if(q) p.set('q',q);
+    if($('fe').value) p.set('entity',$('fe').value);
+    if($('fa').value) p.set('action',$('fa').value);
+    if($('factor').value) p.set('actor',$('factor').value);
+    if($('ffrom').value) p.set('from',$('ffrom').value);
+    if($('fto').value) p.set('to',$('fto').value);
+    p.set('limit',String(limit)); p.set('offset',String(offset));
+    $('auditBody').innerHTML='<tr><td colspan="9" class="erp-empty">Loading...</td></tr>';
+    try{
+      const d=await erp.fetchJSON('/api/admin/audit?'+p.toString());
+      total=Number(d.total||0); limit=Number(d.limit||limit);
+      if(loadFacets&&d.facets) renderFacets(d.facets);
+      const rows=d.logs||[];
+      $('auditBody').innerHTML=rows.length?rows.map(x=>`<tr>
+        <td class="small text-muted">${x.id}</td>
+        <td class="small text-muted">${esc((x.ts||'').slice(0,19).replace('T',' '))}</td>
+        <td class="small"><div class="fw-semibold">${esc(x.actor_name||x.actor_user||'-')}</div><div class="text-muted">${esc(x.actor_user||'')}</div></td>
+        <td class="small">${esc(x.actor_role||'')}</td>
+        <td class="small">${esc(x.entity_type||'-')}${x.entity_id?`<div class="text-muted">#${esc(x.entity_id)}</div>`:''}</td>
+        <td><span class="badge ${actionClass(x.action)}">${esc(x.action||'-')}</span></td>
+        <td>${prettyValue(x.old_value)}</td>
+        <td>${prettyValue(x.new_value)}</td>
+        <td class="audit-details small">${esc(x.details||'-')}</td>
+      </tr>`).join(''):'<tr><td colspan="9" class="erp-empty">No audit entries match. Submit attendance / OD / settings to populate.</td></tr>';
+      const start=total?offset+1:0; const end=Math.min(offset+limit,total);
+      $('auditCount').textContent=total?`Showing ${start}-${end} of ${total} entries`:'No entries';
+      $('auditPage').textContent=`Page ${Math.floor(offset/limit)+1} of ${Math.max(1,Math.ceil(total/limit))}`;
+      $('prevPage').disabled=offset<=0; $('nextPage').disabled=offset+limit>=total;
+      syncUrl();
+    }catch(e){
+      $('auditBody').innerHTML='<tr><td colspan="9" class="text-danger small">Could not load audit log: '+esc(e.message||e)+'</td></tr>';
+    }
+  }
+  $('auditFilters').addEventListener('submit',e=>{e.preventDefault(); offset=0; load(true);});
+  $('clear').addEventListener('click',()=>{ ['fq','fe','fa','factor','ffrom','fto'].forEach(id=>$(id).value=''); offset=0; load(true); });
+  $('flimit').addEventListener('change',()=>{ limit=Number($('flimit').value)||200; offset=0; load(); });
+  $('prevPage').addEventListener('click',()=>{ offset=Math.max(0,offset-limit); load(); });
+  $('nextPage').addEventListener('click',()=>{ if(offset+limit<total){ offset+=limit; load(); } });
+  readUrl(); load(true);
+})();
 </script>
 {% endblock %}
