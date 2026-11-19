@@ -21,7 +21,7 @@ from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_file, abort, redirect, url_for, session, flash
 from werkzeug.utils import secure_filename
 from markupsafe import Markup
-from model import train_model_background, extract_embedding_for_image, load_model_if_exists, MODEL_PATH, predict_with_model, detect_faces_bboxes, crop_face_and_embed
+from model import train_model_background, extract_embedding_for_image, load_model_if_exists, MODEL_PATH, predict_with_model, detect_faces_bboxes, crop_face_and_embed, face_capabilities
 import hashlib
 import cv2
 import numpy as np
@@ -2537,7 +2537,9 @@ def api_admin_face_status():
     c.execute("SELECT COUNT(*) FROM face_attendance_jobs WHERE status IN ('queued','processing')")
     active = int(c.fetchone()[0] or 0)
     conn.close()
+    models = face_capabilities()
     return jsonify(ok=True, model_ready=model_ready, train=read_train_status(), active_jobs=active,
+                   models=models,
                    thresholds={'match': FACE_MATCH_MIN_CONFIDENCE, 'review': FACE_MATCH_REVIEW_CONFIDENCE},
                    limits={'video_mb': FACE_VIDEO_MAX_MB, 'webcam_mb': FACE_WEBCAM_MAX_MB,
                            'video_faces': FACE_VIDEO_MAX_FACES, 'unknown_groups': FACE_UNKNOWN_MAX_GROUPS},

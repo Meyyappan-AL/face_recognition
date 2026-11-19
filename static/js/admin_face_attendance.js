@@ -12,9 +12,12 @@
   let draft = {};
   let touched = new Set();
   let stream = null;
+  let streamPromise = null;
   let pollTimer = null;
   let captureBusy = false;
   let latestVideoJobId = null;
+  let cameraNote = 'Camera idle.';
+  let cameraNoteType = 'muted';
 
   function selection() {
     return {
@@ -28,6 +31,26 @@
     const host = $('faceAlertHost');
     if (!msg) { host.innerHTML = ''; return; }
     host.innerHTML = `<div class="alert alert-${type || 'info'} py-2 mb-3">${esc(msg)}</div>`;
+  }
+
+  function setCameraNote(msg, type) {
+    cameraNote = msg || 'Camera idle.';
+    cameraNoteType = type || 'muted';
+    const el = $('faceCameraState');
+    if (!el) return;
+    el.className = `small text-${cameraNoteType}`;
+    el.textContent = cameraNote;
+  }
+
+  function cameraError(e) {
+    const name = e && e.name;
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+      return 'Camera access was blocked. Allow camera permission and use HTTPS or localhost, then try again.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'No camera was found on this device.';
+    if (name === 'NotReadableError' || name === 'TrackStartError') return 'The camera is busy. Close other apps using it, then try again.';
+    if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') return 'The camera cannot satisfy the requested resolution. Try again with the default camera.';
+    return (e && e.message) || 'Could not start the camera.';
   }
 
   function statusBadge(status) {
@@ -242,6 +265,16 @@
       if (d.model_ready) {
         b.className = 'badge bg-success';
         b.textContent = 'Trained model ready';
+        if (d.models) {
+          const detector = d.models.detector === 'yunet' ? 'YuNet' : 'Haar';
+          const embedding = d.models.embedding === 'sface' ? 'SFace' : 'Grayscale';
+          b.textContent += ` · ${detector} · ${embedding}`;
+          b.title = `Detector: ${detector}; recognizer: ${embedding}`;
+          if (d.models.embedding === 'sface' && !d.models.sface_available) {
+            b.className = 'badge bg-warning text-dark';
+            b.title = 'SFace embedding metadata is saved, but the SFace model asset is missing.';
+          }
+        }
       } else {
         b.className = 'badge bg-warning text-dark';
         b.textContent = 'No trained model';
@@ -298,6 +331,7 @@
       const d = await api(`/api/admin/face/jobs/${jobId}`);
       const job = d.job;
       if (job.source === 'video') latestVideoJobId = job.id;
+      if (stream && (job.source !== 'webcam' || job.status !== 'recording')) stopStream();
       await loadRosterForJob(job);
       setActiveJob(job, true);
       $('faceClass').value = job.class_name;
@@ -314,6 +348,7 @@
 
   async function refreshJob(jobId, keepReset) {
     const d = await api(`/api/admin/face/jobs/${jobId}`);
+    if (stream && (d.job.source !== 'webcam' || d.job.status !== 'recording')) stopStream();
     if (!activeJob || activeJob.id === jobId) setActiveJob(d.job, !!keepReset);
     return d.job;
   }
@@ -352,22 +387,89 @@
     }, 800);
   }
 
+  function handleTrackEnded() {
+    if (!stream) return;
+    stopStream();
+    setCameraNote('Camera disconnected. Start Webcam Job again to reconnect.', 'warning');
+  }
+
+  function waitForVideoFrame(video) {
+    if (video.readyState >= 2 && video.videoWidth && video.videoHeight) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { cleanup(); reject(new Error('Camera did not provide a frame within 8 seconds.')); }, 8000);
+      const success = () => {
+        if (video.videoWidth && video.videoHeight) { cleanup(); resolve(); }
+      };
+      const failure = () => { cleanup(); reject(new Error('Camera preview failed.')); };
+      function cleanup() {
+        clearTimeout(timer);
+        video.removeEventListener('loadedmetadata', success);
+        video.removeEventListener('canplay', success);
+        video.removeEventListener('playing', success);
+        video.removeEventListener('error', failure);
+      }
+      video.addEventListener('loadedmetadata', success);
+      video.addEventListener('canplay', success);
+      video.addEventListener('playing', success);
+      video.addEventListener('error', failure);
+    });
+  }
+
   async function startStream() {
-    if (stream) return;
+    if (stream) return stream;
+    if (streamPromise) return streamPromise;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('This browser cannot access a webcam here.');
+      throw new Error('Camera access requires HTTPS or localhost and a supported browser.');
     }
-    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false });
-    $('faceVideo').srcObject = stream;
-    await $('faceVideo').play();
+    setCameraNote('Requesting camera access...', 'info');
+    streamPromise = (async () => {
+      let media;
+      try {
+        media = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: 'user' },
+          audio: false,
+        });
+      } catch (e) {
+        if (e && (e.name === 'OverconstrainedError' || e.name === 'ConstraintNotSatisfiedError')) {
+          media = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } else {
+          throw e;
+        }
+      }
+      stream = media;
+      const video = $('faceVideo');
+      video.srcObject = stream;
+      stream.getVideoTracks().forEach((track) => track.addEventListener('ended', handleTrackEnded));
+      try {
+        await video.play();
+      } catch (e) {
+        if (!e || e.name !== 'AbortError') throw new Error('Camera preview could not start.');
+      }
+      await waitForVideoFrame(video);
+      setCameraNote('Camera ready. Keep one student in frame.', 'success');
+      return stream;
+    })();
+    try {
+      return await streamPromise;
+    } catch (e) {
+      stopStream();
+      const message = cameraError(e);
+      setCameraNote(message, 'danger');
+      throw new Error(message);
+    } finally {
+      streamPromise = null;
+    }
   }
 
   function stopStream() {
     if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
+      stream.getVideoTracks().forEach((track) => track.removeEventListener('ended', handleTrackEnded));
+      stream.getTracks().forEach((track) => track.stop());
       stream = null;
     }
-    $('faceVideo').srcObject = null;
+    const video = $('faceVideo');
+    if (video) video.srcObject = null;
+    setCameraNote('Camera stopped.', 'muted');
     renderCameraState();
   }
 
@@ -397,11 +499,12 @@
   }
 
   async function captureFace() {
-    if (!activeJob || activeJob.status !== 'recording' || !stream || captureBusy) return;
+    if (!activeJob || activeJob.status !== 'recording' || captureBusy) return;
     captureBusy = true;
     $('faceCaptureBtn').disabled = true;
     $('faceCaptureBtn').textContent = 'Capturing...';
     try {
+      if (!stream) await startStream();
       const video = $('faceVideo');
       if (!video.videoWidth || !video.videoHeight) throw new Error('Camera frame is not ready.');
       const canvas = document.createElement('canvas');
@@ -617,6 +720,12 @@
       if (del) deleteJob(Number(del.dataset.jobId));
     });
     window.addEventListener('beforeunload', stopStream);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && stream) {
+        stopStream();
+        setCameraNote('Camera paused while the tab was hidden. Reconnect to capture.', 'warning');
+      }
+    });
   }
 
   document.addEventListener('DOMContentLoaded', () => {
