@@ -6,7 +6,9 @@ import numpy as np
 import pickle
 from sklearn.ensemble import RandomForestClassifier
 
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = "model.pkl"
+FACE_MODEL_META_PATH = os.path.join(_APP_DIR, "model.meta.json")
 
 _haar_cascade = None
 _mp_face_detector = None
@@ -14,7 +16,10 @@ _mp_detector_kind = None  # 'solutions' | 'tasks' | None
 _yunet_detector = None
 _yunet_path = None
 _yunet_size = None
+_sface_recognizer = None
+_sface_path = None
 _detector_lock = threading.Lock()
+_sface_lock = threading.Lock()
 
 
 def _get_haar():
@@ -126,6 +131,88 @@ def _get_yunet():
     return _yunet_detector
 
 
+def _resolve_model_path():
+    return MODEL_PATH if os.path.isabs(MODEL_PATH) else os.path.join(_APP_DIR, MODEL_PATH)
+
+
+def _model_meta():
+    try:
+        with open(FACE_MODEL_META_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _get_sface():
+    global _sface_recognizer, _sface_path
+    candidates = [
+        os.environ.get("ERP_FACE_RECOGNIZER_MODEL", ""),
+        os.environ.get("FACE_RECOGNIZER_MODEL", ""),
+        os.path.join(_APP_DIR, "face_recognition_sface_2021dec.onnx"),
+        os.path.join(_APP_DIR, "models", "face_recognition_sface_2021dec.onnx"),
+    ]
+    model_path = next((p for p in candidates if p and os.path.exists(p)), None)
+    if not model_path or not hasattr(cv2, "FaceRecognizerSF"):
+        return None
+    with _sface_lock:
+        if _sface_recognizer is None or _sface_path != model_path:
+            try:
+                _sface_recognizer = cv2.FaceRecognizerSF.create(model_path, "")
+                _sface_path = model_path
+            except Exception:
+                _sface_recognizer = None
+                _sface_path = None
+    return _sface_recognizer
+
+
+def _requested_embedding_mode():
+    value = os.environ.get("ERP_FACE_EMBEDDING", "").strip().lower()
+    if value in ("sface", "sface_v1", "opencv_sface"):
+        return "sface"
+    if value in ("grayscale", "gray", "legacy"):
+        return "grayscale"
+    return ""
+
+
+def _embedding_mode():
+    meta_mode = str(_model_meta().get("embedding") or "").strip().lower()
+    if meta_mode in ("sface", "grayscale"):
+        return meta_mode
+    requested = _requested_embedding_mode()
+    if requested == "sface" and _get_sface() is not None:
+        return "sface"
+    return "grayscale"
+
+
+def face_capabilities():
+    detector = "yunet" if _get_yunet() is not None else "haar"
+    embedding = _embedding_mode()
+    return {
+        "detector": detector,
+        "embedding": embedding,
+        "yunet_available": detector == "yunet",
+        "sface_available": _get_sface() is not None,
+        "embedding_available": embedding != "sface" or _get_sface() is not None,
+        "model_path": _resolve_model_path(),
+        "model_meta": _model_meta(),
+    }
+
+
+def _sface_matrix_from_bbox(bbox):
+    x1, y1, x2, y2 = [float(v) for v in bbox]
+    width = max(1.0, x2 - x1)
+    height = max(1.0, y2 - y1)
+    landmarks = [
+        x1 + width * 0.32, y1 + height * 0.38,
+        x1 + width * 0.68, y1 + height * 0.38,
+        x1 + width * 0.50, y1 + height * 0.56,
+        x1 + width * 0.35, y1 + height * 0.72,
+        x1 + width * 0.65, y1 + height * 0.72,
+    ]
+    return np.array([[x1, y1, x2, y2] + landmarks], dtype=np.float32)
+
+
 def _iou(box_a, box_b):
     ax1, ay1, ax2, ay2 = box_a
     bx1, by1, bx2, by2 = box_b
@@ -218,6 +305,20 @@ def crop_face_and_embed(bgr_image, bbox_or_detection):
         x2 = max(0, min(x2, w)); y2 = max(0, min(y2, h))
     if x2 <= x1 or y2 <= y1:
         return None
+    if _embedding_mode() == "sface":
+        recognizer = _get_sface()
+        if recognizer is None:
+            return None
+        try:
+            aligned = recognizer.alignCrop(bgr_image, _sface_matrix_from_bbox((x1, y1, x2, y2)))
+            if aligned is None or aligned.size == 0:
+                return None
+            feature = recognizer.feature(aligned)
+            if feature is None:
+                return None
+            return np.asarray(feature, dtype=np.float32).flatten()
+        except Exception:
+            return None
     face = bgr_image[y1:y2, x1:x2]
     face = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
     face = cv2.resize(face, (32, 32), interpolation=cv2.INTER_AREA)
@@ -251,9 +352,10 @@ def extract_embedding_for_image(stream_or_bytes):
 
 # ---- Load model helpers ----
 def load_model_if_exists():
-    if not os.path.exists(MODEL_PATH):
+    path = _resolve_model_path()
+    if not os.path.exists(path):
         return None
-    with open(MODEL_PATH, "rb") as f:
+    with open(path, "rb") as f:
         return pickle.load(f)
 
 def predict_with_model(clf, emb):
@@ -275,6 +377,8 @@ def train_model_background(dataset_dir, progress_callback=None):
     """
     X = []
     y = []
+    embedding_mode = _embedding_mode()
+    detector_mode = "yunet" if _get_yunet() is not None else "haar"
     student_dirs = [d for d in os.listdir(dataset_dir) if os.path.isdir(os.path.join(dataset_dir, d))]
     total_students = max(1, len(student_dirs))
     processed = 0
@@ -319,12 +423,14 @@ def train_model_background(dataset_dir, progress_callback=None):
     y = np.array(y)
 
     if progress_callback:
-        progress_callback(85, f"Training RandomForest on {len(y)} samples...")
+        progress_callback(85, f"Training RandomForest ({embedding_mode}) on {len(y)} samples...")
     clf = RandomForestClassifier(n_estimators=150, n_jobs=-1, random_state=42)
     clf.fit(X, y)
 
-    with open(MODEL_PATH, "wb") as f:
+    with open(_resolve_model_path(), "wb") as f:
         pickle.dump(clf, f)
+    with open(FACE_MODEL_META_PATH, "w", encoding="utf-8") as f:
+        json.dump({"embedding": embedding_mode, "detector": detector_mode}, f)
 
     if progress_callback:
         progress_callback(100, "Training complete")

@@ -33,7 +33,7 @@ This file is the source of truth for continuing the ERP project in a new chat. R
 
 ## 3. Current High-Level Status
 
-The ERP is functional for the main admin, staff, HOD/advisor, and student flows. Recent work added notification infrastructure, active-account enforcement, dependency/env files, a shared base template/nav for most admin pages, persisted default-Absent materialization, semester-end edit windows, day-of OD application, semester-scoped timetable versions with a manual grid editor and PDF/image reference upload, version-scoped elective mappings with immutable per-entry elective labels and a shared elective roster, role-scoped attendance insights with comparisons/absence filters, medical leave and student analytics, and admin-only webcam/video face attendance with review-before-submit. Wave 2 adds real `N` status, stored `-` unmarked periods, configurable marking window, in-app staff unmarked-period reminders, and calendar/timetable/elective polish.
+The ERP is functional for the main admin, staff, HOD/advisor, and student flows. Recent work added notification infrastructure, active-account enforcement, dependency/env files, a shared base template/nav for most admin pages, persisted default-Absent materialization, semester-end edit windows, day-of OD application, semester-scoped timetable versions with a manual grid editor and PDF/image reference upload, version-scoped elective mappings with immutable per-entry elective labels and a shared elective roster, role-scoped attendance insights with comparisons/absence filters, medical leave and student analytics, and admin-only webcam/video face attendance with review-before-submit. Wave 2 adds real `N` status, stored `-` unmarked periods, configurable marking window, in-app staff unmarked-period reminders, and calendar/timetable/elective polish. Wave 3 adds webcam lifecycle/permission reliability fixes and optional YuNet/SFace model support with graceful fallback.
 
 ### Completed and verified
 
@@ -185,6 +185,11 @@ Verified recently:
 - Wave 2 smoke test passed `28/28` on a fresh temp DB. It covers setting defaults/clamps, status normalization and helpers, analytics `-`/`N` behavior, 06:00/day-15/future window boundaries, unmarked reminder creation and staff assignment, reminder read/read-all endpoints, digest updates and cleanup, admin settings, calendar end-date validation, timetable reference class validation, and elective version validation.
 - Wave 2 guarded real-DB migration completed with backups `C:\Users\alagu\AppData\Local\Temp\opencode\wave2_attendance_backup_pre_migration.db` and `C:\Users\alagu\AppData\Local\Temp\opencode\wave2_attendance_backup_pre_migration_20261118_225752.db`. It converted `2572` `source='auto_absent'` `Absent` entries to `-`, preserved four manual `Absent` entries, sanitized auto-created session labels, added `staff_alerts`, and set attendance window settings to `06:00`, `15` days, `22:00`.
 - Re-run after Wave 2: Wave 1 `29/29`, timetable `15/15`, elective migration `1/1`, electives `17/17`, insights `23/23`, medical `46/46`, face `36/36`, and Phase A/B `33/33` passed. Two smoke-script expectations were updated for the approved Wave 2 policy: medical cancellation reverts to `-` instead of `Absent`, and the dashboard synthetic-cell check accepts `-`/`N`.
+- Wave 3 webcam reliability is implemented: concurrent `getUserMedia` calls are coalesced, camera starts wait for a real video frame, overconstrained devices fall back to default camera constraints, permission/busy/disconnect/tab-hidden errors show actionable status text, capture reconnects a dropped stream, and streams stop when a job closes/finishes or the page unloads.
+- Wave 3 model support is implemented with graceful fallback: YuNet ONNX is used when present, SFace ONNX can be enabled with `ERP_FACE_RECOGNIZER_MODEL` or local model files, and trained embedding mode is recorded in `model.meta.json`. Existing installations without new model assets keep Haar detection and 1024-dimensional grayscale embeddings, so no model/DB migration is required.
+- `/api/admin/face/status` now returns `models` with detector, embedding, asset availability, resolved model path, and saved metadata; the admin face badge shows the active detector/embedding mode.
+- Wave 3 verification: `python -m py_compile app.py model.py`, `git diff --check`, `node --check static/js/admin_face_attendance.js`, `wave3_model_smoke.py` `6/6`, face `36/36`, Wave 2 `28/28`, Wave 1 `29/29`, timetable `15/15`, electives `17/17`, insights `23/23`, medical `46/46`, and Phase A/B `33/33` passed. Phase 7 reported `28/29` and Phase C/D `18/19` only for the known pre-existing crop-file and overlapping-real-DB smoke caveats.
+- Remaining Wave 3 verification is manual browser camera-permission/stream lifecycle testing on the deployment machine and real classroom recognition accuracy testing when model assets/footage are available.
 
 Important current local data state:
 
@@ -504,7 +509,7 @@ Verification: `python -m py_compile app.py` passes; a 33-check temporary-DB smok
 
 - Wave 1 — foundation closeout, student role, staff management, settings/audit (completed server-side; browser verification pending).
 - Wave 2 — academic calendar polish, timetable polish, electives polish, real `N` attendance status, hyphen `-` unmarked policy, and staff unmarked-period reminders (completed server-side; browser verification pending).
-- Wave 3 — webcam/camera fixes and optional YuNet/SFace model upgrade.
+- Wave 3 — webcam/camera fixes and optional YuNet/SFace model upgrade (completed server-side/client-side; real browser and classroom accuracy verification pending).
 - Wave 4 — records/reports finalization and final QA/handoff.
 
 Approved Wave 1 student-role rule:
@@ -717,7 +722,8 @@ Use the `grep` tool for deeper searches.
    - Redesign Phase 1: admin/student foundation (completed server-side; manual responsive UI checklist pending)
    - Wave 1: student role, staff management, settings/audit (completed server-side; manual browser verification pending)
    - Wave 2: `N` status, `-` unmarked policy, staff reminders, calendar/timetable/electives polish (completed server-side; manual browser verification pending)
-   - Next: manual browser verification of Waves 1-2, then Wave 3 (webcam/camera fixes and optional YuNet/SFace model upgrade)
+   - Wave 3: webcam/camera reliability fixes and optional YuNet/SFace support with graceful fallback (completed; real browser and classroom accuracy verification pending)
+   - Next: manual browser verification of Waves 1-3, then Wave 4 (records/reports finalization and final QA/handoff)
    - Deployment-machine/browser verification and real classroom accuracy testing remain when data is available
    - Cloud/R2/Postgres/CCTV remain deferred until staff approval
    - Real-channel notification delivery still requires SMTP/Fast2SMS/VAPID credentials
