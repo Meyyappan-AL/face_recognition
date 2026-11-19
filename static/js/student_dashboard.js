@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let selectedSemester = null;
   let lastOverview = null;
+  let todayIst = '';
 
   function stClass(st){
     if (st==='Present') return 'st-Present';
@@ -98,7 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const box=$('subjectBreakdown'); if(!box) return;
     box.innerHTML=subjects.length?subjects.map(s=>{
       const pct=Number(s.percentage||0);
-      const color=pct>=75?'bg-success':pct>=60?'bg-warning':'bg-danger';
+      const threshold=Number(lastOverview?.threshold||75);
+      const color=pct>=threshold?'bg-success':pct>=Math.max(0,threshold-15)?'bg-warning':'bg-danger';
       return `<div class="subject-row"><div class="d-flex justify-content-between gap-2"><span class="fw-semibold">${esc(s.subject)}</span><span class="badge bg-light text-dark border">${pct}%</span></div><div class="progress mt-1" style="height:5px"><div class="progress-bar ${color}" style="width:${Math.max(0,Math.min(100,pct))}%"></div></div><div class="text-muted" style="font-size:.7rem">${s.credited}/${s.total} credited | ${s.present}P ${s.late}L ${s.od}OD ${s.medical}ML ${s.absent}A</div></div>`;
     }).join(''):'<div class="small text-muted">No marked subject periods yet.</div>';
   }
@@ -118,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderDashboard(d){
     const o=d.overview||{};
     lastOverview=o;
+    todayIst=d.today_ist||'';
     selectedSemester = o.semester_id || selectedSemester;
     const range = `${fmtDate(o.from)} - ${fmtDate(o.to)}${o.is_current? ' (ongoing)':''}`;
     $('overviewRange').textContent = `${o.semester_label||'Semester'} | ${range}`;
@@ -256,7 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('openOdBtn')?.addEventListener('click', openOd);
   $('openOdNav')?.addEventListener('click', openOd);
   $('scopeType')?.addEventListener('change', ()=>{ $('specificBox').style.display = $('scopeType').value==='specific' ? 'block':'none'; });
-  function setOdDates(){ const t=new Date().toISOString().slice(0,10); if($('odFrom') && !$('odFrom').value) $('odFrom').value=t; if($('odTo') && !$('odTo').value) $('odTo').value=t; }
+  function setOdDates(){ const t=todayIst||new Date().toISOString().slice(0,10); if($('odFrom') && !$('odFrom').value) $('odFrom').value=t; if($('odTo') && !$('odTo').value) $('odTo').value=t; }
   function odMsg(t,c='text-muted'){ const e=$('odMsg'); if(e){e.className='small mt-2 '+c; e.textContent=t;} }
 
   async function loadOdHistory(){
