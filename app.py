@@ -2839,41 +2839,79 @@ def _period_where(period, ts_col='timestamp'):
     if period=='monthly': return f" WHERE date({ts_col})>=date('now','-30 days')"
     return ''
 
+def _report_period_bounds(period):
+    today=_now_ist().date()
+    if period=='daily': return today.isoformat(), today.isoformat()
+    if period=='weekly': return (today-datetime.timedelta(days=6)).isoformat(), today.isoformat()
+    if period=='monthly': return (today-datetime.timedelta(days=29)).isoformat(), today.isoformat()
+    return '', ''
+
+def _clean_date_pair(date_from='', date_to=''):
+    d1=_parse_iso_date(date_from); d2=_parse_iso_date(date_to)
+    if d1 and d2 and d2<d1: return '', ''
+    return (d1.isoformat() if d1 else ''), (d2.isoformat() if d2 else '')
+
+def _report_date_range(period, date_from='', date_to=''):
+    dfrom,dto=_clean_date_pair(date_from,date_to)
+    if not dfrom and not dto: return _report_period_bounds(period)
+    return dfrom,dto
+
+def _staff_scope_where():
+    if session.get('role')=='admin': return '', []
+    code=(session.get('staff_code') or session.get('username') or '').strip()
+    name=(session.get('display_name') or '').strip()
+    return "(upper(COALESCE(s.staff_code,''))=upper(?) OR upper(COALESCE(s.staff_name,''))=upper(?))", [code, name]
+
+def _report_absence_flags(items):
+    by_day={}
+    for item in items:
+        key=item.get('status_key')
+        if key=='unmarked': continue
+        by_day.setdefault((item.get('student_id'), item.get('date')), []).append(key)
+    full_days=set(); partial_days=set(); absent_days=set()
+    for day_key,statuses in by_day.items():
+        absent_count=sum(1 for key in statuses if key=='absent')
+        if absent_count:
+            absent_days.add(day_key)
+            if absent_count==len(statuses): full_days.add(day_key)
+            else: partial_days.add(day_key)
+    return full_days, partial_days, absent_days
+
+def _report_absence_keep(item, absence, full_days, partial_days, absent_days):
+    day_key=(item.get('student_id'), item.get('date'))
+    if absence=='full_day': return day_key in full_days
+    if absence=='partial_day': return day_key in partial_days
+    if absence=='period_wise': return item.get('status_key')=='absent'
+    if absence=='none': return day_key not in absent_days
+    return True
+
 @app.route('/attendance_record', methods=['GET'])
 @staff_required
 def attendance_record():
     period=request.args.get('period','all'); cls=(request.args.get('class') or '').strip()
+    dfrom,dto=_clean_date_pair(request.args.get('from'),request.args.get('to'))
     absence=(request.args.get('absence') or 'any').strip().lower()
     if absence not in ('any','full_day','partial_day','period_wise','none'): absence='any'
     sem_id=(request.args.get('semester_id') or '').strip()
     sem=_semester_by_id(sem_id) if sem_id else None
-    sem_from=sem_to=''
-    if sem:
-        sd1,sd2=_semester_window(sem, cls or None); sem_from=sd1.isoformat(); sem_to=sd2.isoformat()
+    if sem and not dfrom and not dto:
+        sd1,sd2=_semester_window(sem, cls or None); report_from=sd1.isoformat(); report_to=sd2.isoformat()
+    else:
+        report_from,report_to=_report_date_range(period,dfrom,dto)
     conn=_db(); c=conn.cursor()
-    # legacy raw log
-    c.execute('SELECT id,student_id,name,timestamp FROM attendance'+_period_where(period)+' ORDER BY timestamp DESC LIMIT 2000')
-    records=c.fetchall()
-    # period-session log (source of truth for manual attendance; reflects updates)
     where=[]; params=[]
     if cls: where.append('upper(s.class_name)=upper(?)'); params.append(cls)
-    if sem_from: where.append('s.date>=?'); params.append(sem_from)
-    if sem_to: where.append('s.date<=?'); params.append(sem_to)
-    if period=='daily': where.append("s.date=date('now','localtime')")
-    elif period=='weekly': where.append("s.date>=date('now','localtime','-7 days')")
-    elif period=='monthly': where.append("s.date>=date('now','localtime','-30 days')")
-    if session.get('role')!='admin':
-        staff_code=(session.get('staff_code') or session.get('username') or '').strip()
-        staff_name=(session.get('display_name') or '').strip()
-        where.append("(upper(COALESCE(s.staff_code,''))=upper(?) OR upper(COALESCE(s.staff_name,''))=upper(?))")
-        params += [staff_code,staff_name]
+    if report_from: where.append('s.date>=?'); params.append(report_from)
+    if report_to: where.append('s.date<=?'); params.append(report_to)
+    scope_clause,scope_params=_staff_scope_where()
+    if scope_clause: where.append(scope_clause); params += scope_params
     wh=(' WHERE '+' AND '.join(where)) if where else ''
     q = ("SELECT s.date,s.class_name,s.period,s.subject_display,e.student_name,e.reg_no,e.status,e.marked_by,e.updated_at,s.id,e.student_id,e.elective_label "
          "FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id"+wh+" ORDER BY s.date DESC,s.period DESC,s.class_name,e.student_name LIMIT 5000")
     try:
         c.execute(q, params); session_rows=c.fetchall()
         emaps=_elective_lookup()
-        session_rows=[tuple(r)+((r[11] or _effective_subject(emaps,r[10],r[1],r[0],r[2],'')),) for r in session_rows]
+        session_rows=[tuple(r)+((r[11] or _effective_subject(emaps,r[10],r[1],r[0],r[2],'')), _analytics_status_key(r[6])) for r in session_rows]
     except Exception: session_rows=[]
     conn.close()
     by_day={}
@@ -2918,10 +2956,11 @@ def attendance_record():
                             'student_role':session_roles.get(int(sid or 0),''),
                             'present':pcount,'absent':acount,'total':tcount,'pct':pct,
                             'first_in_fmt':'','last_out_fmt':'','duration':'','roll':reg or '','section':'','manual':f'{pcount} credited, {acount} absent, {pct}%'} )
-    note='Period-session manual attendance (submitted sessions). Changes/overrides update attendance entries and are reflected in reports/student log. Missing exit never marks absent.'
+    note='Period-session manual attendance (submitted sessions). Unmarked "-" rows are excluded; N counts as absent. Changes/overrides update attendance entries and are reflected in reports/student log. Missing exit never marks absent.'
     if session.get('role')!='admin': note+=' Staff view covers only sessions handled/submitted by you.'
-    return render_template('attendance_record.html', records=records, session_rows=session_rows, session_roles=session_roles, period=period, class_name=cls, report_rows=report_rows,
+    return render_template('attendance_record.html', session_rows=session_rows, session_roles=session_roles, period=period, class_name=cls, report_rows=report_rows,
                            semesters=[_semester_json(s) for s in _semester_rows()], semester_id=(sem or {}).get('id'), absence=absence,
+                           date_from=report_from, date_to=report_to,
                            summary={'total':total,'present':present,'absent':absent,'note':note})
 
 @app.route('/download_csv', methods=['GET'])
@@ -5509,14 +5548,26 @@ def api_medical_history():
 @staff_required
 def download_period_csv():
     period=request.args.get('period','all'); cls=(request.args.get('class') or '').strip()
+    dfrom,dto=_clean_date_pair(request.args.get('from'),request.args.get('to'))
+    absence=(request.args.get('absence') or 'any').strip().lower()
+    if absence not in ('any','full_day','partial_day','period_wise','none'): absence='any'
+    sem=_semester_by_id(request.args.get('semester_id')) if request.args.get('semester_id') else None
+    if sem and not dfrom and not dto:
+        sd1,sd2=_semester_window(sem, cls or None); report_from=sd1.isoformat(); report_to=sd2.isoformat()
+    else:
+        report_from,report_to=_report_date_range(period,dfrom,dto)
     conn=_db(); c=conn.cursor(); where=[]; params=[]
     if cls: where.append('upper(s.class_name)=upper(?)'); params.append(cls)
-    if period=='daily': where.append("s.date=date('now','localtime')")
-    elif period=='weekly': where.append("s.date>=date('now','localtime','-7 days')")
-    elif period=='monthly': where.append("s.date>=date('now','localtime','-30 days')")
+    if report_from: where.append('s.date>=?'); params.append(report_from)
+    if report_to: where.append('s.date<=?'); params.append(report_to)
+    scope_clause,scope_params=_staff_scope_where()
+    if scope_clause: where.append(scope_clause); params += scope_params
     wh=(' WHERE '+' AND '.join(where)) if where else ''
     c.execute("SELECT s.date,s.class_name,s.period,s.subject_display,e.reg_no,e.student_name,e.status,e.marked_by,e.updated_at,e.student_id,e.elective_label FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id"+wh+" ORDER BY s.date,s.period,s.class_name,e.student_name", params)
     rows=c.fetchall(); conn.close()
+    items=[{'date':r[0],'student_id':r[9],'status_key':_analytics_status_key(r[6])} for r in rows]
+    full_days,partial_days,absent_days=_report_absence_flags(items)
+    rows=[r for r,item in zip(rows,items) if _report_absence_keep(item,absence,full_days,partial_days,absent_days)]
     emaps=_elective_lookup()
     output=io.StringIO(); output.write('Date,Class,Period,Subject,RegNo,Name,Status,MarkedBy,Updated,SelectedElective\n')
     for r in rows:
@@ -5827,7 +5878,7 @@ def service_worker_file():
 @app.route('/api/analytics/overview')
 @staff_required
 def api_analytics_overview():
-    cls=(request.args.get('class') or '').strip(); dfrom=(request.args.get('from') or '').strip(); dto=(request.args.get('to') or '').strip()
+    cls=(request.args.get('class') or '').strip(); dfrom,dto=_clean_date_pair(request.args.get('from'),request.args.get('to'))
     sem=_semester_by_id(request.args.get('semester_id')) if request.args.get('semester_id') else None
     if sem and not dfrom and not dto:
         sd1,sd2=_semester_window(sem, cls or None)
@@ -5919,7 +5970,7 @@ def _analytics_finalize(bucket):
 def api_analytics_insights():
     role=session.get('role'); is_admin=(role=='admin')
     cls=(request.args.get('class') or '').strip()
-    dfrom=(request.args.get('from') or '').strip(); dto=(request.args.get('to') or '').strip()
+    dfrom,dto=_clean_date_pair(request.args.get('from'),request.args.get('to'))
     absence=(request.args.get('absence') or 'any').strip().lower()
     if absence not in ('any','full_day','partial_day','period_wise','none'): absence='any'
     mode=(request.args.get('compare') or 'class').strip().lower()
@@ -6081,24 +6132,40 @@ def api_admin_audit():
 @staff_required
 def download_defaulters_csv():
     cls=(request.args.get('class') or '').strip()
+    dfrom,dto=_clean_date_pair(request.args.get('from'),request.args.get('to'))
+    absence=(request.args.get('absence') or 'any').strip().lower()
+    if absence not in ('any','full_day','partial_day','period_wise','none'): absence='any'
+    sem=_semester_by_id(request.args.get('semester_id')) if request.args.get('semester_id') else None
+    if sem and not dfrom and not dto:
+        sd1,sd2=_semester_window(sem, cls or None); report_from=sd1.isoformat(); report_to=sd2.isoformat()
+    else:
+        report_from,report_to=_report_date_range('all',dfrom,dto)
     try: threshold=float(get_setting('defaulter_threshold','75') or 75)
     except Exception: threshold=75.0
     conn=_db(); c=conn.cursor(); where=[]; params=[]
     if cls: where.append('upper(s.class_name)=upper(?)'); params.append(cls)
+    if report_from: where.append('s.date>=?'); params.append(report_from)
+    if report_to: where.append('s.date<=?'); params.append(report_to)
+    scope_clause,scope_params=_staff_scope_where()
+    if scope_clause: where.append(scope_clause); params += scope_params
     wh=(' WHERE '+' AND '.join(where)) if where else ''
-    c.execute("SELECT e.student_id,e.student_name,e.reg_no,s.class_name,e.status,count(*) FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id"+wh+" GROUP BY e.student_id,s.class_name,e.status", params)
+    c.execute("SELECT e.student_id,e.student_name,e.reg_no,s.class_name,s.date,e.status FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id"+wh+" ORDER BY e.student_name", params)
+    raw=c.fetchall(); conn.close()
+    items=[{'student_id':r[0],'date':r[4],'status_key':_analytics_status_key(r[5])} for r in raw]
+    full_days,partial_days,absent_days=_report_absence_flags(items)
     agg={}
-    for sid,name,reg,cn,st,cnt in c.fetchall():
+    for r,item in zip(raw,items):
+        if not _report_absence_keep(item,absence,full_days,partial_days,absent_days): continue
+        sid,name,reg,cn,_dt,st=r
         stn=_normalize_attendance_status(st)
         if stn==UNMARKED_STATUS: continue
-        a=agg.setdefault((sid,name,reg,cn),{'p':0,'a':0,'od':0,'l':0,'t':0}); a['t']+=cnt
-        if stn in ('Present','Medical Leave'): a['p']+=cnt
-        elif stn in ('Absent','N'): a['a']+=cnt
-        elif stn=='OD': a['od']+=cnt
-        elif stn=='Late': a['l']+=cnt
-    conn.close()
+        a=agg.setdefault((sid,name,reg,cn),{'p':0,'a':0,'od':0,'l':0,'t':0}); a['t']+=1
+        if stn in ('Present','Medical Leave'): a['p']+=1
+        elif stn in ('Absent','N'): a['a']+=1
+        elif stn=='OD': a['od']+=1
+        elif stn=='Late': a['l']+=1
     emaps=_elective_lookup()
-    out=io.StringIO(); out.write('RegNo,Name,Class,Present,Absent,OD,Late,Total,Percentage,Defaulter(<%s%%),Electives\n'%threshold)
+    out=io.StringIO(); out.write('RegNo,Name,Class,Present/ML,Absent/N,OD,Late,Total,Percentage,Defaulter(<%s%%),Electives\n'%threshold)
     for (sid,name,reg,cn),a in sorted(agg.items(), key=lambda kv:(kv[0][3] or '', kv[0][1] or '')):
         pct=round(((a['p']+a['od']+a['l'])/a['t']*100),2) if a['t'] else 0.0
         if pct>=threshold: continue

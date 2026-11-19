@@ -37,4 +37,14 @@ body.erp-body::before{background:rgba(244,247,251,.72) !important}
   .erp-topbar .navbar-brand{font-size:1rem}
   .erp-actions .btn{width:100%}
 }
-@media print{.erp-topbar,.no-print,#erpToastHost{display:none !important}body.erp-body{background:#fff !important;padding:0 !important}}
+@media print{
+  @page{margin:10mm}
+  .erp-topbar,.no-print,#erpToastHost,.modal,.modal-backdrop{display:none !important}
+  body.erp-body{background:#fff !important;padding:0 !important}
+  .erp-shell{max-width:none !important;margin:0 !important}
+  .erp-card,.card,.glass-card{box-shadow:none !important;background:#fff !important;break-inside:avoid}
+  .erp-table-wrap,.table-responsive,.grid-wrap{max-height:none !important;overflow:visible !important}
+  .erp-table thead th{position:static !important}
+  table{width:100% !important;break-inside:auto}
+  tr{break-inside:avoid}
+}
