@@ -162,14 +162,14 @@ def _normalize_dob(dob):
     return dob
 
 def _class_year_info(class_name):
-    text = _norm(class_name).upper()
-    match = re.match(r'^(\d{2})[A-Z]*(\d+)[A-Z0-9]*$', text)
-    if not match:
+    """Infer batch/study year from class like 24IT5A. Rule: sem1-2=Y1,3-4=Y2,5-6=Y3,7-8=Y4."""
+    name = canonical_class_name(class_name)
+    m = CLASS_NAME_RE.match(name)
+    if not m:
         return '', ''
-    start = 2000 + int(match.group(1))
-    study = (int(match.group(2)) + 1) // 2
-    if study < 1 or study > 4:
-        study = ''
+    start = 2000 + int(m.group(1))
+    sem = int(m.group(2))
+    study = (sem + 1) // 2
     return f'{start}-{start + 4}', study
 
 def _normalize_batch_year(value):
@@ -224,27 +224,43 @@ def _staff_password(display_name):
 def _env(name, default=''):
     return (os.environ.get(name) or default or '').strip()
 
-def get_classes():
-    """Return class names discovered from timetables/*.json (fallback to known classes)."""
-    classes = []
+# Phase 1 class registry and normalization
+CLASS_REGISTRY = ['23IT7A', '23IT7B', '24IT5A', '24IT5B', '25IT3A', '25IT3B']
+LEGACY_CLASS_MAP = {'24IIT5A': '24IT5A', '24IIT5B': '24IT5B', '24ITR7A': '23IT7A'}
+CLASS_NAME_RE = re.compile(r'^(\d{2})IT([1-8])([A-Z])$')
+
+def canonical_class_name(class_name: str) -> str:
+    name = _norm(class_name).upper()
+    return LEGACY_CLASS_MAP.get(name, name)
+
+def is_valid_class_name(class_name: str) -> bool:
+    return bool(CLASS_NAME_RE.match(canonical_class_name(class_name)))
+
+def get_classes(include_legacy: bool = False):
+    """Return canonical class names from registry plus any valid DB classes."""
+    classes = list(CLASS_REGISTRY)
     try:
-        for name in sorted(os.listdir(TIMETABLE_DIR)):
-            if not name.lower().endswith('.json'):
-                continue
-            path = os.path.join(TIMETABLE_DIR, name)
-            try:
-                with open(path, 'r', encoding='utf-8-sig') as f:
-                    data = json.load(f)
-                cls = _norm(data.get('class') or os.path.splitext(name)[0])
-            except Exception:
-                cls = os.path.splitext(name)[0]
-            if cls and cls not in classes:
-                classes.append(cls)
+        conn = _db(); c = conn.cursor()
+        c.execute("SELECT DISTINCT class FROM students WHERE class IS NOT NULL AND TRIM(class)!='' ORDER BY class")
+        for (name,) in c.fetchall():
+            n = canonical_class_name(name)
+            if n and (include_legacy or is_valid_class_name(n)) and n not in classes:
+                classes.append(n)
+        conn.close()
     except Exception:
         pass
-    if not classes:
-        classes = ['24IIT5A', '24IIT5B']
-    return classes
+    if include_legacy:
+        try:
+            for name in sorted(os.listdir(TIMETABLE_DIR)):
+                if name.lower().endswith('.json'):
+                    n = canonical_class_name(os.path.splitext(name)[0])
+                    if n and n not in classes:
+                        classes.append(n)
+        except Exception:
+            pass
+    valid = sorted([x for x in classes if is_valid_class_name(x)])
+    extras = sorted([x for x in classes if not is_valid_class_name(x)])
+    return valid + extras
 
 def _timetable_version_row(class_name, on_date=None):
     """Return the effective timetable version for a class/date, if one exists."""
@@ -4566,7 +4582,7 @@ def _advisor_for_class(class_name):
     if tt and (tt.get('class_advisor') or {}).get('initials'):
         return ((tt['class_advisor']['initials'] or '').upper(), tt['class_advisor'].get('name') or '')
     # fallback known mapping
-    m={'24IIT5A':('KB','Ms. K. Baby'),'24IIT5B':('TK','Ms. T. Kokilavani')}
+    m={'24IT5A':('KB','Ms. K. Baby'),'24IT5B':('TK','Ms. T. Kokilavani'),'23IT7A':('','')}
     return m.get((class_name or '').upper(), (None,None))
 
 def _normalize_od_scope(scope_type, periods_json, half):
@@ -4714,7 +4730,7 @@ def api_od_request():
     class_name=(student[3] or '').strip()
     advisor_code, advisor_name = _advisor_for_class(class_name)
     if not advisor_code:
-        return jsonify({'ok':False,'error':f'Class advisor not found for class "{class_name}". Ask admin to set correct class (24IIT5A/24IIT5B).'}), 400
+        return jsonify({'ok':False,'error':f'Class advisor not found for class "{class_name}". Ask admin to set correct class in YYIT<sem><section> format.'}), 400
     proof_path, proof_name = _save_od_proof(request.files.get('proof'))  # optional
     now=datetime.datetime.utcnow().isoformat()
     day_wise = 1 if scope=='full_day' else 0

@@ -1,10 +1,10 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}Add Student{% endblock %}
 {% block content %}
   <div class="container" style="max-width:1080px">
     <div class="card p-4 shadow-sm glass-card">
       <h4 class="mb-1">Add Student (Full Details) + Face Capture</h4>
-      <p class="small text-muted">Student login = <strong>Register Number + DOB</strong>. Class must match timetable for manual attendance (e.g., <code>24IIT5A</code>, <code>24IIT5B</code>).</p>
+      <p class="small text-muted">Student login = <strong>Register Number + DOB</strong>. Class must match timetable for manual attendance (e.g., <code>24IT5A</code>, <code>24IT5B</code>).</p>
       <form id="studentForm">
         <div class="row g-2">
           <div class="col-md-4"><label class="form-label small">Full Name *</label><input class="form-control" name="name" required></div>
@@ -71,3 +71,4 @@
 })();
 </script>
 {% endblock %}
+

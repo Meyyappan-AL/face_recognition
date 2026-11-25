@@ -7,12 +7,15 @@ dataset/
 uploads/
 uploads/od_proofs/
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 
 # Local runtime DB is persistent for this deployment; keep out of git by default.
 attendance.db
 *.db
-
+*.sqlite
+*.sqlite3
 
 

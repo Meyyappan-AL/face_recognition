@@ -1,5 +1,5 @@
 ﻿{
-  "class": "24IIT5A",
+  "class": "24IT5A",
   "hall": "102",
   "class_advisor": {"name": "Ms. K. Baby", "initials": "KB", "is_hod": false},
   "slots": [
@@ -73,3 +73,4 @@
     "RM":"Dr. R. Menaka","TN":"Ms. T. Nithya","KB":"Ms. K. Baby","ES":"Ms. E. Sudha","TK":"Mr. T. Kokilavani","SM":"Ms. S. Mekala","VG":"Ms. V. Gomathi","MS":"Mr. M. Sharmila","BD":"Mr. B. Dinesh Kumar","CK":"Ms. C. Kanimozhi","RMY":"Dr. R. Mynavathi","KN":"Ms. K. Nevedha","PM":"Ms. P. Malar","MR":"Ms. M. Ramya","MK":"Dr. M. Kavitha","MV":"Ms. M. Vimala","RMW":"Ms. R. Maheshwari","TS":"Ms. T. Saranya","KG":"Dr. K. Ganesh Kumar"
   }
 }
+

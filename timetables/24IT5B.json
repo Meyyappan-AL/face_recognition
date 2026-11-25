@@ -1,5 +1,5 @@
 ﻿{
-  "class": "24IIT5B",
+  "class": "24IT5B",
   "hall": "202",
   "class_advisor": {"name": "Ms. T. Kokilavani", "initials": "TK", "is_hod": false},
   "slots": [
@@ -73,3 +73,4 @@
     "TN":"Ms. T. Nithya","ES":"Ms. E. Sudha","TK":"Mr. T. Kokilavani","KB":"Ms. K. Baby","MS":"Mr. M. Sharmila","CK":"Ms. C. Kanimozhi","SM":"Ms. S. Mekala","VG":"Ms. V. Gomathi","RM":"Dr. R. Menaka","PM":"Ms. P. Malar","MR":"Ms. M. Ramya","RMW":"Ms. R. Maheshwari","KN":"Ms. K. Nevedha","TS":"Ms. T. Saranya","MK":"Dr. M. Kavitha","MV":"Ms. M. Vimala","RMY":"Dr. R. Mynavathi","KG":"Dr. K. Ganesh Kumar","BD":"Mr. B. Dinesh Kumar"
   }
 }
+
