@@ -335,6 +335,52 @@ def _ensure_column(c, table, col, coldef):
     try: c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")
     except Exception: pass
 
+
+def _migrate_phase1_class_registry(c):
+    mapping = dict(LEGACY_CLASS_MAP)
+    targets = [
+        ('students','class'), ('attendance','class_name'), ('attendance_entries','class_name'),
+        ('attendance_edits','class_name'), ('attendance_audit','class_name'),
+        ('face_attendance','class_name'), ('face_attendance_records','class_name'),
+        ('elective_offerings','class_name'), ('timetable_versions','class_name'),
+        ('timetable_snapshots','class_name'), ('period_locks','class_name'),
+        ('od_requests','class_name'), ('medical_requests','class_name'),
+        ('alerts','target_class'), ('users','advisor_class'),
+    ]
+    for table,col in targets:
+        try:
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+            if not c.fetchone(): continue
+            c.execute(f"PRAGMA table_info({table})"); cols=[r[1] for r in c.fetchall()]
+            if col not in cols: continue
+            for old,new in mapping.items():
+                c.execute(f"UPDATE {table} SET {col}=? WHERE upper(trim({col}))=upper(?)", (new,old))
+        except Exception:
+            pass
+    for table,col in [('timetable_versions','timetable_json'),('timetable_snapshots','snapshot_json')]:
+        try:
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+            if not c.fetchone(): continue
+            c.execute(f"SELECT rowid,{col} FROM {table}")
+            for rowid,val in c.fetchall():
+                if not val: continue
+                nv=val
+                for old,new in mapping.items(): nv=nv.replace(old,new)
+                if nv!=val: c.execute(f"UPDATE {table} SET {col}=? WHERE rowid=?", (nv,rowid))
+        except Exception:
+            pass
+    try:
+        c.execute("UPDATE users SET active=1, deleted_at=NULL WHERE role IN ('staff','hod','admin') AND deleted_at IS NOT NULL AND deleted_at!=''")
+    except Exception:
+        pass
+    try:
+        c.execute("SELECT id,class,batch_year,study_year FROM students")
+        for sid,cls,by,sy in c.fetchall():
+            n=canonical_class_name(cls); iby,isy=_class_year_info(n)
+            if n!=cls or (not by and iby) or (not sy and isy):
+                c.execute("UPDATE students SET class=?, batch_year=COALESCE(NULLIF(batch_year,''),?), study_year=CASE WHEN study_year IS NULL OR study_year='' THEN ? ELSE study_year END WHERE id=?", (n,iby,isy,sid))
+    except Exception:
+        pass
 def init_db():
     conn = _db(); c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS students (

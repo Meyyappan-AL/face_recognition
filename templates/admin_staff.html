@@ -15,7 +15,6 @@
       <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Staff accounts</div><div class="value" id="kTotal">-</div><div class="sub">excluding Admin</div></div></div>
       <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Active</div><div class="value text-success" id="kActive">-</div><div class="sub">can log in</div></div></div>
       <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Advisors</div><div class="value text-primary" id="kAdvisors">-</div><div class="sub">class advisors</div></div></div>
-      <div class="col-6 col-md-3"><div class="card erp-card p-3 erp-kpi"><div class="label">Archived</div><div class="value text-secondary" id="kArchived">-</div><div class="sub">soft-deleted</div></div></div>
     </div>
 
     <div class="card erp-card p-3 mb-3">
@@ -45,7 +44,6 @@
             <option value="staff">Regular staff</option>
             <option value="active">Active only</option>
             <option value="inactive">Inactive</option>
-            <option value="deleted">Archived</option>
           </select>
         </div>
         <div class="col-md-2"><button id="refreshBtn" class="btn btn-outline-dark btn-sm w-100" type="button">Refresh</button></div>
@@ -87,7 +85,7 @@
           <ul class="small text-muted mb-0 ps-3">
             <li><code>staff_code</code> and <code>display_name</code> are required.</li>
             <li><code>is_hod</code> and <code>active</code> accept 1/0, true/false, yes/no.</li>
-            <li>Archived staff are reactivated when imported with <code>active=1</code>.</li>
+            <li>Phase 1: staff archive removed; accounts are Active or Deactivated only.</li>
             <li>Rows with a student login code are rejected.</li>
           </ul>
         </div>
@@ -168,7 +166,6 @@
   function formMsg(t){ const e=$('formMsg'); if(!t){ e.classList.add('d-none'); e.textContent=''; return; } e.classList.remove('d-none'); e.textContent=t; }
   function initials(name){ const parts=(name||'').trim().split(/\s+/).filter(Boolean); return ((parts[0]||'?')[0]+(parts.length>1?(parts[parts.length-1][0]||''):'')).toUpperCase(); }
   function statusBadge(s){
-    if(s.deleted_at) return '<span class="badge bg-dark">Archived</span>';
     return Number(s.active)?'<span class="badge bg-success">Active</span>':'<span class="badge bg-secondary">Inactive</span>';
   }
   function roleBadges(s){
@@ -180,9 +177,8 @@
   }
   function renderKpis(){
     $('kTotal').textContent=staff.length;
-    $('kActive').textContent=staff.filter(s=>Number(s.active)&&!s.deleted_at).length;
-    $('kAdvisors').textContent=staff.filter(s=>Number(s.is_advisor)&&!s.deleted_at).length;
-    $('kArchived').textContent=staff.filter(s=>!!s.deleted_at).length;
+    $('kActive').textContent=staff.filter(s=>Number(s.active)).length;
+    $('kAdvisors').textContent=staff.filter(s=>Number(s.is_advisor)).length;
   }
   function renderTable(){
     const q=($('search').value||'').trim().toLowerCase();
@@ -193,9 +189,8 @@
       if(f==='hod' && !Number(s.is_hod)) return false;
       if(f==='advisor' && !Number(s.is_advisor)) return false;
       if(f==='staff' && (Number(s.is_hod)||Number(s.is_advisor))) return false;
-      if(f==='active' && (!Number(s.active)||s.deleted_at)) return false;
-      if(f==='inactive' && (Number(s.active)||s.deleted_at)) return false;
-      if(f==='deleted' && !s.deleted_at) return false;
+      if(f==='active' && !Number(s.active)) return false;
+      if(f==='inactive' && Number(s.active)) return false;
       return true;
     });
     if(!rows.length){ $('staffBody').innerHTML='<tr><td colspan="7" class="text-center text-muted py-4">No staff match this view.</td></tr>'; return; }
@@ -343,7 +338,6 @@
     const rs=e.target.closest('[data-reset]'); if(rs){ resetPassword(Number(rs.dataset.reset),rs.dataset.name||'this staff member'); return; }
     const da=e.target.closest('[data-deactivate]'); if(da){ setStatus(Number(da.dataset.deactivate),'deactivate','Could not deactivate account:'); return; }
     const ra=e.target.closest('[data-reactivate]'); if(ra){ setStatus(Number(ra.dataset.reactivate),'reactivate','Could not reactivate account:'); return; }
-    const dl=e.target.closest('[data-delete]'); if(dl){ if(confirm('Archive '+dl.dataset.name+'? They will immediately lose access. This keeps history intact.')) setStatus(Number(dl.dataset.delete),'delete','Could not archive account:'); }
   });
   $('ttBody').addEventListener('click',e=>{
     const ed=e.target.closest('[data-edit]'); if(ed){ openForm(staff.find(s=>Number(s.id)===Number(ed.dataset.edit))); return; }
