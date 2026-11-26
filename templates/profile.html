@@ -7,6 +7,10 @@
         <div class="card erp-card p-3 h-100">
           <h5 class="erp-section-title mb-3">Account Details</h5>
           {% if student %}
+            <div class="d-flex align-items-center gap-3 mb-3">
+              <img src="/student_photo_safe/{{ student.id }}?t={{ range(1,999999)|random }}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:12px;border:1px solid #e2e8f0;background:#f8fafc">
+              <div class="small text-muted">Profile photo is display-only by default. Training frames are managed separately by admin.</div>
+            </div>
             <dl class="row small mb-0 g-2">
               <dt class="col-5 text-muted fw-normal">Name</dt><dd class="col-7 mb-0 fw-semibold">{{ rep_badge(student.student_role) }}{{ student.name or '-' }}</dd>
               <dt class="col-5 text-muted fw-normal">Reg No (Login)</dt><dd class="col-7 mb-0">{{ student.reg_no or '-' }}</dd>
