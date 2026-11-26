@@ -46,6 +46,23 @@
 
     <div class="row g-3">
       <div class="col-12 col-xl-8">
+                <div class="card erp-card p-3 mb-3">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <div>
+              <h6 class="erp-section-title mb-1">Import timetable (CSV/Text)</h6>
+              <div class="erp-muted small">Paste timetable text/CSV. Preview validates, Apply creates a <strong>new version</strong> and syncs staff from STAFF INCHARGE.</div>
+            </div>
+            <span class="badge bg-info text-dark">Phase 2</span>
+          </div>
+          <textarea id="importText" class="form-control form-control-sm mb-2" rows="6" spellcheck="false" placeholder="Paste timetable CSV/text here..."></textarea>
+          <div class="d-flex gap-2 flex-wrap align-items-center">
+            <input id="importFile" type="file" class="form-control form-control-sm" style="max-width:260px" accept=".csv,.txt,text/plain,text/csv">
+            <button id="previewImportBtn" class="btn btn-outline-primary btn-sm" type="button">Preview import</button>
+            <button id="applyImportBtn" class="btn btn-success btn-sm" type="button">Apply as new version</button>
+          </div>
+          <pre id="importResult" class="small mt-2 mb-0 text-muted" style="white-space:pre-wrap"></pre>
+        </div>
+
         <div class="card erp-card p-3 mb-3">
           <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
             <div>
@@ -595,6 +612,32 @@
   $('saveBtn').addEventListener('click',saveVersion);
   $('downloadBtn').addEventListener('click',downloadJSON);
   $('uploadRefBtn').addEventListener('click',uploadReference);
+  $('importFile').addEventListener('change',async e=>{ const f=e.target.files[0]; if(!f) return; $('importText').value=await f.text(); });
+  async function previewImport(){
+    $('importResult').textContent='Parsing...';
+    try{
+      const d=await erp.fetchJSON('/api/admin/timetable/import/preview',{method:'POST',body:{class:$('classSelect').value,semester_id:state.semesterId,text:$('importText').value}});
+      state._importPreview=d; state._importText=$('importText').value;
+      $('importResult').textContent=`Preview OK for ${d.class}. Staff: ${d.staff_count}. Warnings: ${(d.warnings||[]).length}
+` + (d.warnings||[]).join('
+');
+      if(d.data){ state.data=d.data; state.class=d.class; renderEditor(); setDirty(true); msg('Import preview loaded into editor. Review then Apply.','success'); }
+    }catch(e){ const data=e.data||{}; $('importResult').textContent=(data.errors||[e.message]).join('
+'); msg(e.message||'Import preview failed','danger'); }
+  }
+  async function applyImport(){
+    if(!confirm('Apply import as a NEW timetable version and sync staff?')) return;
+    $('importResult').textContent='Applying...';
+    try{
+      const d=await erp.fetchJSON('/api/admin/timetable/import/apply',{method:'POST',body:{class:$('classSelect').value,semester_id:state.semesterId,effective_from:$('effectiveFrom').value,text:$('importText').value,notes:'Imported timetable'}});
+      await loadVersions(d.class||$('classSelect').value,state.semesterId); if(d.version_id) await loadVersion(d.version_id);
+      $('importResult').textContent=`Imported ${d.class} v${d.version_no}. Staff sync: ${JSON.stringify(d.staff_sync||{})}`;
+      erp.toast('Timetable imported as new version','success');
+    }catch(e){ const data=e.data||{}; $('importResult').textContent=(data.errors||[e.message]).join('
+'); msg(e.message||'Import failed','danger'); }
+  }
+  $('previewImportBtn').addEventListener('click',previewImport);
+  $('applyImportBtn').addEventListener('click',applyImport);
   window.addEventListener('beforeunload',e=>{ if(state.dirty){ e.preventDefault(); e.returnValue=''; } });
 
   (async function init(){

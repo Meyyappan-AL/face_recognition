@@ -623,24 +623,30 @@ def init_db():
     if not os.path.exists(TRAIN_STATUS_FILE): write_train_status({"running": False, "progress": 0, "message": "No training yet."})
 
 def sync_staff_from_timetables(reset_passwords=False):
-    """Create/update staff users from timetable data. Passwords are preserved by default."""
+    """Create/update staff users from timetable data. Preserves passwords/profile/active/deleted."""
     staff_map, advisors = all_timetable_staff()
     conn = _db(); c = conn.cursor(); now = datetime.datetime.utcnow().isoformat()
     added = updated = 0
     for code, info in staff_map.items():
         display = _norm(info.get('name') or code)
         username = code.upper(); is_hod = 1 if code == HOD_STAFF_CODE else 0; adv = advisors.get(code)
-        c.execute('SELECT id,password FROM users WHERE username=?', (username,))
+        adv_class = canonical_class_name((adv or {}).get('class') or '')
+        c.execute('SELECT id,password,active,deleted_at,role,display_name FROM users WHERE upper(username)=upper(?) OR upper(staff_code)=upper(?) ORDER BY id LIMIT 1', (username, code))
         row = c.fetchone()
         if not row:
-            c.execute('INSERT INTO users (username,password,role,staff_code,display_name,is_hod,is_advisor,advisor_class,active,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-                      (username, _hash_pw(_staff_password(display)), 'staff', code, display, is_hod, 1 if adv else 0, (adv or {}).get('class'), 1, now))
+            c.execute('INSERT INTO users (username,password,role,staff_code,display_name,is_hod,is_advisor,advisor_class,active,deleted_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                      (username, _hash_pw(_staff_password(display)), 'staff', code, display, is_hod, 1 if adv else 0, adv_class or None, 1, None, now))
             added += 1
         else:
+            uid=row[0]
+            role=(row[4] or 'staff')
+            if role not in ('staff','hod','admin'):
+                continue
+            keep_display=_norm(row[5]) or display
             if reset_passwords:
-                c.execute('UPDATE users SET password=? WHERE id=?', (_hash_pw(_staff_password(display)), row[0]))
-            c.execute('UPDATE users SET staff_code=?,display_name=?,is_hod=?,is_advisor=?,advisor_class=?,role=? WHERE id=? AND role IN ("staff","hod","admin")',
-                      (code, display, is_hod, 1 if adv else 0, (adv or {}).get('class'), 'staff', row[0]))
+                c.execute('UPDATE users SET password=? WHERE id=?', (_hash_pw(_staff_password(keep_display)), uid))
+            c.execute('UPDATE users SET staff_code=?,display_name=?,is_hod=?,is_advisor=?,advisor_class=?,deleted_at=NULL WHERE id=?',
+                      (code, keep_display, is_hod, 1 if adv else 0, adv_class or None, uid))
             updated += 1
     conn.commit(); conn.close()
     return {'added': added, 'updated': updated, 'staff': len(staff_map), 'advisors': len(advisors)}
@@ -1351,8 +1357,8 @@ def _validate_timetable(data, class_name=None):
     return [], warnings
 
 def _timetable_path(class_name):
-    cls=_norm(class_name)
-    if not cls or not re.fullmatch(r'[A-Za-z0-9._-]{1,40}', cls): return None
+    cls=canonical_class_name(class_name)
+    if not cls or not is_valid_class_name(cls): return None
     return os.path.join(TIMETABLE_DIR, f'{cls}.json')
 
 def _timetable_version_status(row, today=None):
@@ -1413,11 +1419,12 @@ def _write_timetable_json_file(class_name, payload):
     os.replace(tmp,path)
 
 def _save_timetable_version(class_name, semester_id, effective_from, payload,
-                            reference_path='', reference_name='', notes=''):
+                            reference_path='', reference_name='', notes='', force_new=False):
     """Create or update a timetable version, then mirror the latest JSON file."""
     errors,warnings=_validate_timetable(payload, class_name)
     if errors:
         return {'ok':False,'error':'Validation failed','errors':errors,'warnings':warnings}
+    cls=canonical_class_name(class_name)
     sem=_semester_by_id(semester_id) if semester_id else _current_semester()
     if not sem:
         return {'ok':False,'error':'A valid semester is required.'}
@@ -1443,9 +1450,9 @@ def _save_timetable_version(class_name, semester_id, effective_from, payload,
         c.execute("""SELECT id,version_no,effective_from,effective_to
                      FROM timetable_versions WHERE upper(class_name)=upper(?) AND semester_id=?
                        AND effective_from<=?
-                     ORDER BY effective_from DESC, version_no DESC LIMIT 1""",(class_name,semester_id,eff))
+                     ORDER BY effective_from DESC, version_no DESC LIMIT 1""",(cls,semester_id,eff))
         latest=c.fetchone()
-        action='update' if latest and eff==str(latest[2] or '') else 'create'
+        action='create' if force_new else ('update' if latest and eff==str(latest[2] or '') else 'create')
         if action=='update':
             version_id=latest[0]
             c.execute("""UPDATE timetable_versions
@@ -1455,13 +1462,13 @@ def _save_timetable_version(class_name, semester_id, effective_from, payload,
                          WHERE id=?""",
                       (json.dumps(payload,ensure_ascii=False),ref_path,ref_name,(notes or '').strip(),now,version_id))
             c.execute("UPDATE timetable_versions SET is_active=0 WHERE upper(class_name)=upper(?) AND semester_id=? AND id<>?",
-                      (class_name,semester_id,version_id))
+                      (cls,semester_id,version_id))
             c.execute("UPDATE timetable_versions SET is_active=1 WHERE id=?",(version_id,))
             version_no=int(latest[1] or 1)
             effective_to=(latest[3] or '').strip() or sem_end or None
         else:
             c.execute("""SELECT COALESCE(MAX(version_no),0) FROM timetable_versions
-                         WHERE upper(class_name)=upper(?) AND semester_id=?""",(class_name,semester_id))
+                         WHERE upper(class_name)=upper(?) AND semester_id=?""",(cls,semester_id))
             version_no=int(c.fetchone()[0] or 0)+1
             if latest:
                 prev_day=(eff_d-datetime.timedelta(days=1)).isoformat()
@@ -1469,10 +1476,10 @@ def _save_timetable_version(class_name, semester_id, effective_from, payload,
             c.execute("""UPDATE timetable_versions SET effective_to=?,is_active=0
                          WHERE upper(class_name)=upper(?) AND semester_id=? AND effective_from<?
                            AND (effective_to IS NULL OR effective_to='' OR effective_to>=?)""",
-                      ((eff_d-datetime.timedelta(days=1)).isoformat(),class_name,semester_id,eff,eff))
+                      ((eff_d-datetime.timedelta(days=1)).isoformat(),cls,semester_id,eff,eff))
             c.execute("""SELECT effective_from FROM timetable_versions
                          WHERE upper(class_name)=upper(?) AND semester_id=? AND effective_from>?
-                         ORDER BY effective_from ASC LIMIT 1""",(class_name,semester_id,eff))
+                         ORDER BY effective_from ASC LIMIT 1""",(cls,semester_id,eff))
             nxt=c.fetchone()
             if nxt and nxt[0]:
                 try: effective_to=(datetime.date.fromisoformat(nxt[0])-datetime.timedelta(days=1)).isoformat()
@@ -1480,7 +1487,7 @@ def _save_timetable_version(class_name, semester_id, effective_from, payload,
             else:
                 effective_to=sem_end or None
             c.execute("UPDATE timetable_versions SET is_active=0 WHERE upper(class_name)=upper(?) AND semester_id=?",
-                      (class_name,semester_id))
+                      (cls,semester_id))
             c.execute("""INSERT INTO timetable_versions
                          (class_name,semester_id,version_no,effective_from,effective_to,timetable_json,
                           reference_path,reference_name,is_active,created_by,created_at,updated_at,notes)
@@ -1560,19 +1567,22 @@ def api_admin_timetable_validate(class_name):
 @app.route('/api/admin/timetable/<class_name>/create', methods=['POST'])
 @admin_required
 def api_admin_timetable_create(class_name):
-    path=_timetable_path(class_name)
+    cls=canonical_class_name(class_name)
+    if not is_valid_class_name(cls):
+        return jsonify({'ok':False,'error':'Invalid class name. Use YYIT<sem><section> (example: 24IT5A).'}), 400
+    path=_timetable_path(cls)
     if not path: return jsonify({'ok':False,'error':'Invalid class name.'}), 400
     if os.path.exists(path): return jsonify({'ok':False,'error':'Timetable already exists.'}), 409
     template={
-        'class':class_name,'hall':'','class_advisor':{'name':'','initials':'','is_hod':False},
+        'class':cls,'hall':'','class_advisor':{'name':'','initials':'','is_hod':False},
         'slots':[{'period':i,'label':f'Hour {i}','start':'','end':''} for i in range(1,8)],
         'breaks':[],'lunch':{'start':'','end':''},
-        'schedule':{d:[{'period':i,'subject':'','staff':[],'display':''} for i in range(1,8)] for d in DAY_KEYS},
+        'schedule':{d:[] for d in DAY_KEYS},
         'staff_directory':{}
     }
     with open(path,'w',encoding='utf-8') as f: f.write(json.dumps(template,ensure_ascii=False,indent=2))
-    audit_log('timetable', class_name, 'create', None, {'template':True}, details='Admin created timetable template')
-    return jsonify({'ok':True,'text':json.dumps(template,ensure_ascii=False,indent=2)})
+    audit_log('timetable', cls, 'create', None, {'template':True}, details='Admin created timetable template')
+    return jsonify({'ok':True,'class':cls,'text':json.dumps(template,ensure_ascii=False,indent=2)})
 
 @app.route('/api/admin/timetable/versions', methods=['GET'])
 @admin_required
@@ -1608,12 +1618,51 @@ def api_admin_timetable_version_detail(version_id):
     out=_timetable_version_json(dict(zip(keys,row)),include_data=True)
     return jsonify({'ok':True,'version':out})
 
+@app.route('/api/admin/timetable/import/preview', methods=['POST'])
+@admin_required
+def api_admin_timetable_import_preview():
+    data=request.get_json(silent=True) or {}
+    text=data.get('text') or ''
+    cls=canonical_class_name(data.get('class') or '')
+    sem_raw=data.get('semester_id')
+    sem_id=None
+    if sem_raw not in (None,''):
+        try: sem_id=int(sem_raw)
+        except Exception: return jsonify({'ok':False,'error':'Invalid semester.'}), 400
+    res=_parse_timetable_import(text, cls, sem_id)
+    return jsonify(res), (200 if res.get('ok') else 400)
+
+@app.route('/api/admin/timetable/import/apply', methods=['POST'])
+@admin_required
+def api_admin_timetable_import_apply():
+    data=request.get_json(silent=True) or {}
+    text=data.get('text') or ''
+    cls=canonical_class_name(data.get('class') or '')
+    sem_raw=data.get('semester_id')
+    sem=_semester_by_id(sem_raw) if sem_raw not in (None,'') else _current_semester()
+    sem_id=int(sem['id']) if sem else None
+    effective_from=(data.get('effective_from') or _today_ist_str()).strip()
+    preview=_parse_timetable_import(text, cls, sem_id)
+    if not preview.get('ok'):
+        return jsonify(preview), 400
+    payload=preview.get('data') or {}
+    cls=canonical_class_name(payload.get('class') or cls)
+    res=_save_timetable_version(cls, sem_id, effective_from, payload, notes=(data.get('notes') or 'Imported timetable'), force_new=True)
+    if not res.get('ok'):
+        return jsonify(res), 400
+    staff_sync=sync_staff_from_timetables(reset_passwords=False)
+    audit_log('timetable', cls, 'import', None, {'version_id':res.get('version_id'),'effective_from':effective_from}, details='Admin imported timetable')
+    res['staff_sync']=staff_sync
+    res['import']= {'warnings':preview.get('warnings',[]),'staff_count':preview.get('staff_count',0)}
+    return jsonify(res)
+
 @app.route('/api/admin/timetable/versions', methods=['POST'])
 @admin_required
 def api_admin_timetable_version_create():
     data=request.get_json(silent=True) or {}
-    cls=_norm(data.get('class') or '')
+    cls=canonical_class_name(data.get('class') or '')
     if not cls: return jsonify({'ok':False,'error':'Class is required.'}), 400
+    if not is_valid_class_name(cls): return jsonify({'ok':False,'error':'Invalid class name. Use YYIT<sem><section>.'}), 400
     sem_raw=data.get('semester_id')
     if sem_raw in (None,''):
         sem=_current_semester(); sem_id=int(sem['id']) if sem else None
@@ -1641,7 +1690,7 @@ def api_admin_timetable_version_create():
     res=_save_timetable_version(cls,sem_id,effective_from,payload,
                                 reference_path=(data.get('reference_path') or ''),
                                 reference_name=(data.get('reference_name') or ''),
-                                notes=(data.get('notes') or ''))
+                                notes=(data.get('notes') or ''), force_new=bool(data.get('force_new')))
     if res.get('ok'):
         res['staff_sync']=sync_staff_from_timetables(reset_passwords=False)
         audit_log('timetable',cls,'version_save',None,{'version_id':res.get('version_id'),
@@ -1702,6 +1751,155 @@ def api_admin_timetable_reference_upload():
     audit_log('timetable',cls,'reference_upload',None,{'file':safe},details='Admin uploaded timetable reference')
     return jsonify({'ok':True,'reference_path':rel,'reference_name':safe,'reference_url':f'/api/admin/timetable/reference/file/{os.path.basename(stored)}'})
 
+
+
+def _parse_timetable_import(text, class_hint='', semester_id=None):
+    """Parse a simple pasted timetable text/CSV into timetable JSON.
+    Expected header lines: CLASS, HALL NO, CLASS ADVISOR, DAY/PERIOD ... STAFF INCHARGE
+    Rows: DAY, P1..P7, blank staff column
+    Cell: SUBJECT - STAFF (HALL) or SUBJECT (STAFF)
+    """
+    raw=(text or '').replace('\ufeff','')
+    lines=[ln.rstrip('\n\r') for ln in raw.splitlines()]
+    errors=[]; warnings=[]
+    if not any(x.strip() for x in lines):
+        return {'ok':False,'errors':['Import text is empty.'],'warnings':[]}
+    # detect delimiter
+    sample='\n'.join(lines[:10])
+    delim='\t' if '\t' in sample else (',' if sample.count(',')>sample.count('  ') else None)
+    rows=[]
+    if delim==',':
+        import csv, io as _io
+        rows=list(csv.reader(_io.StringIO(raw)))
+    else:
+        for ln in lines:
+            if '\t' in ln: rows.append([x.strip() for x in ln.split('\t')])
+            else: rows.append([x.strip() for x in re.split(r'\s{2,}', ln.strip())])
+    # metadata
+    cls=canonical_class_name(class_hint)
+    hall=''; advisor_name=''; advisor_code=''
+    staff_incharge=[]
+    header_idx=None
+    for i,r in enumerate(rows):
+        cells=[_norm(x) for x in r if _norm(x)]
+        joined=' '.join(cells).upper()
+        if not cls:
+            for c0 in cells:
+                m=re.search(r'\b(\d{2}[A-Z]{2,4}\d[A-Z])\b', c0.upper())
+                if m and is_valid_class_name(canonical_class_name(m.group(1))):
+                    cls=canonical_class_name(m.group(1)); break
+        if joined.startswith('CLASS') and len(cells)>=2 and 'ADVISOR' not in joined:
+            maybe=cells[1]
+            if is_valid_class_name(canonical_class_name(maybe)): cls=canonical_class_name(maybe)
+        if 'HALL' in joined and len(cells)>=2:
+            hall=cells[-1]
+        if 'CLASS ADVISOR' in joined and len(cells)>=2:
+            advisor_name=cells[-1]
+        if 'STAFF INCHARGE' in joined:
+            # staff names after label, may span row
+            for c0 in cells[1:]:
+                if c0.upper()!='STAFF INCHARGE': staff_incharge.append(c0)
+            header_idx=i
+        if 'DAY' in joined and 'PERIOD' in joined:
+            header_idx=i
+    # parse staff incharge block below header
+    if header_idx is not None:
+        for r in rows[header_idx+1:]:
+            c0=_norm(r[0]) if r else ''
+            rest=[_norm(x) for x in r[1:] if _norm(x)] if len(r)>1 else []
+            if c0.upper() in DAY_KEYS:
+                break
+            for x in ([c0]+rest):
+                if x and x.upper() not in ('STAFF INCHARGE','DAY/PERIOD'):
+                    staff_incharge.append(x)
+    if not cls:
+        errors.append('Class not found. Include CLASS line or choose class.')
+    elif not is_valid_class_name(cls):
+        errors.append(f'Invalid class "{cls}". Use YYIT<sem><section>.')
+    # map advisor by matching name in staff_incharge
+    def _code_from_name(name, idx):
+        parts=re.findall(r'[A-Za-z]+', name or '')
+        code=(''.join(p[0] for p in parts[:3]) or f'S{idx}').upper()
+        return code[:4]
+    staff_dir={}
+    name_to_code={}
+    for i,n in enumerate(staff_incharge, start=1):
+        nm=_norm(n)
+        if not nm: continue
+        code=_code_from_name(nm,i)
+        base=code; k=2
+        while code in staff_dir and staff_dir[code]!=nm:
+            code=f"{base[:3]}{k}"; k+=1
+        staff_dir[code]=nm; name_to_code[nm.upper()]=code
+    if advisor_name:
+        advisor_code=name_to_code.get(advisor_name.upper(),'')
+        if not advisor_code:
+            advisor_code=_code_from_name(advisor_name,99)
+            staff_dir.setdefault(advisor_code, advisor_name)
+            name_to_code[advisor_name.upper()]=advisor_code
+    # parse schedule
+    schedule={d:[] for d in DAY_KEYS}
+    day_rows=[r for r in rows if _norm(r[0]).upper() in DAY_KEYS] if rows else []
+    if not day_rows:
+        errors.append('No DAY/PERIOD rows found (MON..SAT).')
+    for rownum,r in enumerate(day_rows, start=1):
+        day=_norm(r[0]).upper()
+        # expect 1..7 in columns 1..7
+        cells=r[1:8]
+        while len(cells)<7: cells.append('')
+        prev=None
+        for p,cell in enumerate(cells, start=1):
+            txt=_norm(cell)
+            if not txt or txt.upper() in {'FREE','-','NIL'}:
+                prev=None; continue
+            if txt=='"' or txt.upper()=='SAME':
+                if prev:
+                    cpy=dict(prev); cpy['period']=p; cpy['display']=cpy.get('subject','')+ ((' ('+', '.join(cpy.get('staff',[]))+')') if cpy.get('staff') else '')
+                    schedule[day].append(cpy)
+                continue
+            # parse SUBJECT - STAFF (HALL) or SUBJECT (STAFF)
+            hall_m=re.search(r'\(([^()]*)\)\s*$', txt)
+            hall_cell=hall_m.group(1).strip() if hall_m else ''
+            core=txt[:hall_m.start()].strip() if hall_m else txt
+            subj=core; staff_names=[]
+            if ' - ' in core:
+                left,right=core.rsplit(' - ',1)
+                subj=left.strip(); staff_names=[x.strip() for x in re.split(r',|/|&', right) if x.strip()]
+            elif hall_cell and re.search(r'[A-Za-z]', hall_cell) and len(hall_cell)<=40:
+                # maybe (STAFF) form
+                staff_names=[x.strip() for x in re.split(r',|/|&', hall_cell) if x.strip()]
+                hall_cell=''
+            codes=[]
+            for sn in staff_names:
+                key=sn.upper()
+                code=name_to_code.get(key)
+                if not code:
+                    code=_code_from_name(sn,len(staff_dir)+1)
+                    base=code; k=2
+                    while code in staff_dir and staff_dir[code]!=sn:
+                        code=f"{base[:3]}{k}"; k+=1
+                    staff_dir[code]=sn; name_to_code[key]=code
+                codes.append(code)
+            is_lab='LAB' in subj.upper() or hall_cell.upper().endswith('LAB') or 'LAB' in hall_cell.upper()
+            disp=subj + (f" ({', '.join(codes)})" if codes else '')
+            cell_obj={'period':p,'subject':subj,'staff':codes,'display':disp}
+            if is_lab: cell_obj['is_lab']=True
+            schedule[day].append(cell_obj); prev=cell_obj
+    slots=[{'period':i,'label':f'Hour {i}','start':['09:00','09:45','10:50','11:40','13:20','14:15','15:20'][i-1],'end':['09:45','10:35','11:40','12:30','14:15','15:10','16:15'][i-1]} for i in range(1,8)]
+    payload={
+        'class':cls or '', 'hall':hall,
+        'class_advisor':{'name':advisor_name,'initials':advisor_code,'is_hod':False},
+        'slots':slots,
+        'breaks':[{'after_period':2,'start':'10:35','end':'10:50'},{'after_period':6,'start':'15:10','end':'15:20'}],
+        'lunch':{'start':'12:30','end':'13:20'},
+        'schedule':schedule,
+        'staff_directory':staff_dir
+    }
+    if cls:
+        verrors,vwarn=_validate_timetable(payload, cls)
+        errors.extend(verrors); warnings.extend(vwarn)
+    return {'ok':len(errors)==0,'errors':errors,'warnings':warnings,'data':payload,'class':cls,
+            'semester_id':semester_id,'staff_count':len(staff_dir),'advisor':payload['class_advisor']}
 @app.route('/api/admin/timetable/reference/file/<path:filename>')
 @admin_required
 def api_admin_timetable_reference_file(filename):
