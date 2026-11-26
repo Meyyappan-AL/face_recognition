@@ -1212,7 +1212,7 @@ def api_admin_staff_reset(uid):
     audit_log('staff', uid, 'reset_password', None, {'password_reset':True}, details='Admin reset staff password')
     return jsonify({'ok':True,'password':pw})
 
-def _set_staff_status(uid, active, deleted, action, details):
+def _set_staff_status(uid, active, _deleted, action, details):
     if session.get('user_id') == uid:
         return jsonify({'ok':False,'error':'You cannot change your own account status.'}), 400
     conn=_db(); c=conn.cursor()
@@ -1221,11 +1221,10 @@ def _set_staff_status(uid, active, deleted, action, details):
     r=c.fetchone()
     if not r: conn.close(); return jsonify({'ok':False,'error':'Staff not found'}), 404
     old=_staff_row_dict(r)
-    deleted_at=_now_iso() if deleted else (None if active else old.get('deleted_at'))
-    c.execute('UPDATE users SET active=?,deleted_at=? WHERE id=?',(1 if active else 0, deleted_at, uid))
+    c.execute('UPDATE users SET active=?,deleted_at=NULL WHERE id=?',(1 if active else 0, uid))
     conn.commit(); conn.close()
-    audit_log('staff', uid, action, {'active':old.get('active'),'deleted_at':old.get('deleted_at')}, {'active':1 if active else 0,'deleted_at':deleted_at}, details=details)
-    return jsonify({'ok':True,'active':1 if active else 0,'deleted':bool(deleted_at)})
+    audit_log('staff', uid, action, {'active':old.get('active')}, {'active':1 if active else 0,'deleted_at':None}, details=details)
+    return jsonify({'ok':True,'active':1 if active else 0,'deleted':False})
 
 @app.route('/api/admin/staff/<int:uid>/deactivate', methods=['POST'])
 @admin_required

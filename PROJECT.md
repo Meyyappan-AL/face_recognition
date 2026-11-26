@@ -1,4 +1,4 @@
-# PROJECT.md
+﻿# PROJECT.md
 
 Last updated: 2026-11-18
 
@@ -37,7 +37,7 @@ The ERP is functional for the main admin, staff, HOD/advisor, and student flows.
 
 ### Completed and verified
 
-- Timetable-backed classes are dynamic via `get_classes()`. Current timetable classes are `24IIT5A` and `24IIT5B`.
+- Timetable-backed classes are dynamic via `get_classes()`. Current timetable classes are `24IT5A` and `24IT5B`.
 - Staff sync from timetables preserves existing passwords by default.
 - Admin pages are available for:
   - Students
@@ -91,7 +91,7 @@ The ERP is functional for the main admin, staff, HOD/advisor, and student flows.
 - Attendance entries snapshot `elective_label` on manual submit, default-Absent materialization, and OD application; roster/report/dashboard views prefer the stored label so historical records do not change when mappings are edited.
 - The admin elective page supports semester/version selection, mapped/missing/unassigned/conflict counts, legacy-source badges, CSV import/export per version, carry-forward from the prior version, and recent elective audit visibility.
 - Both elective staff can mark the full shared class roster; assignment checks also recognize staff codes listed inside elective option labels.
-- Hardcoded class dropdowns were replaced with dynamic classes in the main templates. Remaining `24IIT5A`/`24IIT5B` occurrences are example text only.
+- Hardcoded class dropdowns were replaced with dynamic classes in the main templates. Remaining `24IT5A`/`24IT5B` occurrences are example text only.
 - Literal `` `r`n `` artifacts were removed from the pages where they were found.
 - **Base template migration mostly complete:** every main admin/staff/student page now extends `base.html`; `index.html`, `staff_monitor.html`, `reports.html`, `attendance_record.html`, `take_attendance.html`, `od.html`, `profile.html`, and `student_dashboard.html` were migrated and smoke-tested. The only remaining standalone template is `login.html` (custom auth shell).
 - `requirements.txt` and `.env.example` were added.
@@ -173,8 +173,8 @@ Verified recently:
   - `GET /api/admin/settings` 200 with cutoff `18`, threshold `75`, calendar enforcement `0`
 - Staff management API previously returned 19 staff / 19 timetable staff / 2 advisors.
 - Elective API previously returned:
-  - `24IIT5A`: 7 slots, 0 students
-  - `24IIT5B`: 6 slots, 1 student
+  - `24IT5A`: 7 slots, 0 students
+  - `24IT5B`: 6 slots, 1 student
 - Notification admin API previously returned config all false because SMTP/Fast2SMS/VAPID are unset.
 - Local Phase 5 smoke test passed `46/46` on a temporary DB with a fixed IST clock (`2026-11-16 12:00`). It covers certificate validation, one-active-request enforcement, advisor/HOD scoping and approvals, due-date crediting, medical locks, dashboard/CSV crediting, certificate access, cancellation/reversal, rejections, future deferral, history scoping, and page/nav rendering.
 - Local Phase 6 smoke test passed `36/36` on a temporary DB with recognition monkeypatched for deterministic faces and a generated AVI video. It covers admin-only page/API access, model/limit status, webcam job start, known/unknown capture and dedupe, unknown assignment, stop/review, face-source attendance submit, session/entry confidence and flagged flags, video upload/background status, multi-face aggregation, crop serving, 550 MB limit configuration, video existence, deletion after completion, and job cleanup.
@@ -200,8 +200,8 @@ Verified recently:
 
 Important current local data state:
 
-- Classes: `24IIT5A`, `24IIT5B`
-- Current students: `Meyyappan AL` (id `7`, `24IIT5B`), `Alagappan AL` (id `8`, `24IIT5A`), `Unnamalai` (id `9`, `24IIT5B`)
+- Classes: `24IT5A`, `24IT5B`
+- Current students: `Meyyappan AL` (id `7`, `24IT5B`), `Alagappan AL` (id `8`, `24IT5A`), `Unnamalai` (id `9`, `24IT5B`)
 - Admin user: username `ADMIN`, id `23` (query DB before relying on id; seed/reset can change it)
 - Student login user: id `24`, username `732924ITR320` (query DB before relying on id)
 - `student_electives` currently has no temporary test row.
@@ -244,7 +244,7 @@ Do not hardcode user ids in application code. Test scripts should query the DB i
 - Done: attendance roster API returns `selected_elective` and `effective_subject` per student for option slots.
 - Done: take-attendance roster shows an `Elective` column.
 - Done: attendance records log shows an `Elective` column.
-- Done: reports `/api/analytics/overview` subject aggregation uses the student’s selected elective where mapped.
+- Done: reports `/api/analytics/overview` subject aggregation uses the studentâ€™s selected elective where mapped.
 - Done: `/download_period_csv` appends `SelectedElective`.
 - Done: `/download_defaulters_csv` appends an `Electives` column.
 - Existing attendance sessions still store the timetable base subject; per-student display is resolved through `student_electives` and the entry-level `elective_label` snapshot.
@@ -354,7 +354,7 @@ Completed:
 - Flask smoke tests pass for Admin, Staff, and Student pages.
 - Key APIs return 200:
   - `/api/admin/settings`
-  - `/api/admin/electives?class=24IIT5B`
+  - `/api/admin/electives?class=24IT5B`
   - `/api/admin/notifications`
   - `/api/student/dashboard`
   - `/api/medical/my`
@@ -472,7 +472,7 @@ Verification: `python -m py_compile app.py` passes; a 33-check temporary-DB smok
 
 - Added `medical_requests` and `medical_records`, with one active request per student/semester and resubmission allowed after rejection/cancellation.
 - Full-day is the default; optional selected periods are supported. A certificate is mandatory (`.pdf`, `.jpg`, `.jpeg`, `.png`, `.webp`) and stored under `uploads/medical_certificates/`.
-- Workflow is Advisor → HOD. Approved leave applies date-by-date when due, waits for future dates, credits `Medical Leave`/`medical_workflow`, and preserves explicit Present/Late/OD. HOD can cancel approved leave until the period is over; cancellation reverts credited entries to Absent. Students can cancel pending/advisor-approved requests.
+- Workflow is Advisor â†’ HOD. Approved leave applies date-by-date when due, waits for future dates, credits `Medical Leave`/`medical_workflow`, and preserves explicit Present/Late/OD. HOD can cancel approved leave until the period is over; cancellation reverts credited entries to Absent. Students can cancel pending/advisor-approved requests.
 - `/medical` provides student submission/history, advisor/HOD review queues, certificate access, and role-scoped history. Admin can view history/certificates for audit but does not approve. Advisor contact is a contact card only; no online notifications.
 - Take Attendance shows `Medical Leave` and locks medical entries for non-HOD/Admin staff. HOD/Admin may correct them while the edit window allows.
 - Student dashboard analytics include goal calculator, monthly heatmap, 75% threshold warning, subject/elective breakdown, today/next class, and CSV export. Medical Leave counts as credited attendance. `/student/export_csv` was added.
@@ -504,7 +504,7 @@ Verification: `python -m py_compile app.py` passes; a 33-check temporary-DB smok
 
 ### Redesign Phase 1 - Admin/student foundation (completed server-side; manual UI pending)
 
-- Added `batch_year` and `study_year` columns to `students`, with backfill from class; `24IIT5A` maps to batch `2024-2028` and study year `3`.
+- Added `batch_year` and `study_year` columns to `students`, with backfill from class; `24IT5A` maps to batch `2024-2028` and study year `3`.
 - Updated `add_student`, `admin_edit_student`, `admin_students_page`, and `/students` to validate/return the new fields.
 - Added read-only `/admin/students/<student_id>/attendance` with semester/date/status/period filters and total/credited/absent/percentage summary.
 - Rebuilt `templates/students_list.html` with search, class/batch/year/gender/status/date filters, sorting, KPI cards, photo counts, and detail links.
@@ -514,10 +514,10 @@ Verification: `python -m py_compile app.py` passes; a 33-check temporary-DB smok
 
 ### Consolidated Wave Plan (approved)
 
-- Wave 1 — foundation closeout, student role, staff management, settings/audit (completed server-side; browser verification pending).
-- Wave 2 — academic calendar polish, timetable polish, electives polish, real `N` attendance status, hyphen `-` unmarked policy, and staff unmarked-period reminders (completed server-side; browser verification pending).
-- Wave 3 — webcam/camera fixes and optional YuNet/SFace model upgrade (completed server-side/client-side; real browser and classroom accuracy verification pending).
-- Wave 4 — records/reports finalization and final QA/handoff (completed server-side; manual browser CSV/print/layout verification pending).
+- Wave 1 â€” foundation closeout, student role, staff management, settings/audit (completed server-side; browser verification pending).
+- Wave 2 â€” academic calendar polish, timetable polish, electives polish, real `N` attendance status, hyphen `-` unmarked policy, and staff unmarked-period reminders (completed server-side; browser verification pending).
+- Wave 3 â€” webcam/camera fixes and optional YuNet/SFace model upgrade (completed server-side/client-side; real browser and classroom accuracy verification pending).
+- Wave 4 â€” records/reports finalization and final QA/handoff (completed server-side; manual browser CSV/print/layout verification pending).
 
 Approved Wave 1 student-role rule:
 - `student_role` is optional, selected from dropdown presets or custom text.
@@ -543,8 +543,8 @@ Known development credentials:
 - Admin: `ADMIN` / `ADMIN123` via Admin tab.
 - Staff: Staff tab, password is the staff name in uppercase without titles.
   - Example HOD: `RMY` -> `MYNAVATHI`
-  - Advisor 24IIT5A: `KB` -> `BABY`
-  - Advisor 24IIT5B: `TK` -> `KOKILAVANI`
+  - Advisor 24IT5A: `KB` -> `BABY`
+  - Advisor 24IT5B: `TK` -> `KOKILAVANI`
   - Another example: `TN` -> `NITHYA`
 - Student: register number + DOB.
   - Current student: reg `732924ITR320`, DOB `2007-07-01`
@@ -709,7 +709,7 @@ con.close()
 Find legacy artifacts:
 
 ```powershell
-Select-String -Path templates\*.html -Pattern '24IIT5A|24IIT5B'
+Select-String -Path templates\*.html -Pattern '24IT5A|24IT5B'
 ```
 
 Use the `grep` tool for deeper searches.
@@ -737,3 +737,4 @@ Use the `grep` tool for deeper searches.
    - Real-channel notification delivery still requires SMTP/Fast2SMS/VAPID credentials
 5. Do not commit unless the user explicitly asks.
 6. Update this file whenever the project state or next-step order changes.
+
