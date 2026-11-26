@@ -21,7 +21,7 @@
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
         <div>
           <h5 class="erp-section-title mb-1">Staff / HOD / Advisor Accounts</h5>
-          <div class="erp-muted">Manage staff master data. Timetable sync creates staff only and never changes passwords, contact details, profile fields, deactivation, or archived status.</div>
+          <div class="erp-muted">Manage staff master data. Timetable sync creates staff only and never changes passwords, contact details, profile fields, or activation status. Active/Deactivate only.</div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
           <button id="addBtn" class="btn btn-primary btn-sm" type="button">Add Staff</button>
@@ -85,7 +85,7 @@
           <ul class="small text-muted mb-0 ps-3">
             <li><code>staff_code</code> and <code>display_name</code> are required.</li>
             <li><code>is_hod</code> and <code>active</code> accept 1/0, true/false, yes/no.</li>
-            <li>Phase 1: staff archive removed; accounts are Active or Deactivated only.</li>
+            <li>Accounts are Active or Deactivated only (no archive).</li>
             <li>Rows with a student login code are rejected.</li>
           </ul>
         </div>
@@ -205,11 +205,9 @@
         <td class="text-end text-nowrap">
           <button class="btn btn-outline-primary btn-sm" data-edit="${Number(s.id)}">Edit</button>
           <button class="btn btn-outline-warning btn-sm" data-reset="${Number(s.id)}" data-name="${esc(s.display_name||s.username||'')}">Reset</button>
-          ${s.deleted_at
-            ? `<button class="btn btn-outline-success btn-sm" data-reactivate="${Number(s.id)}">Restore</button>`
-            : (Number(s.active)
-              ? `<button class="btn btn-outline-danger btn-sm" data-deactivate="${Number(s.id)}">Deactivate</button><button class="btn btn-outline-dark btn-sm" data-delete="${Number(s.id)}" data-name="${esc(s.display_name||s.username||'')}">Archive</button>`
-              : `<button class="btn btn-outline-success btn-sm" data-reactivate="${Number(s.id)}">Reactivate</button><button class="btn btn-outline-dark btn-sm" data-delete="${Number(s.id)}" data-name="${esc(s.display_name||s.username||'')}">Archive</button>`)}
+          ${Number(s.active)
+            ? `<button class="btn btn-outline-danger btn-sm" data-deactivate="${Number(s.id)}">Deactivate</button>`
+            : `<button class="btn btn-outline-success btn-sm" data-reactivate="${Number(s.id)}">Activate</button>`}
         </td>
       </tr>`).join('');
   }
@@ -297,7 +295,7 @@
   async function setStatus(id, action, message){
     try{
       const d=await erp.fetchJSON('/api/admin/staff/'+id+'/'+action,{method:'POST',body:{}});
-      msg(d.deleted?'Account archived.':(d.active?'Account reactivated.':'Account deactivated.'),'success');
+      msg(d.active?'Account activated.':'Account deactivated.','success');
       await load();
     }catch(e){ msg(message+' '+esc(e.message||e),'danger'); }
   }

@@ -1280,8 +1280,8 @@ def _set_staff_status(uid, active, _deleted, action, details):
     old=_staff_row_dict(r)
     c.execute('UPDATE users SET active=?,deleted_at=NULL WHERE id=?',(1 if active else 0, uid))
     conn.commit(); conn.close()
-    audit_log('staff', uid, action, {'active':old.get('active')}, {'active':1 if active else 0,'deleted_at':None}, details=details)
-    return jsonify({'ok':True,'active':1 if active else 0,'deleted':False})
+    audit_log('staff', uid, action, {'active':old.get('active')}, {'active':1 if active else 0}, details=details)
+    return jsonify({'ok':True,'active':1 if active else 0})
 
 @app.route('/api/admin/staff/<int:uid>/deactivate', methods=['POST'])
 @admin_required
@@ -1291,20 +1291,15 @@ def api_admin_staff_deactivate(uid):
 @app.route('/api/admin/staff/<int:uid>/reactivate', methods=['POST'])
 @admin_required
 def api_admin_staff_reactivate(uid):
-    return _set_staff_status(uid, True, False, 'reactivate', 'Admin reactivated staff account')
-
-@app.route('/api/admin/staff/<int:uid>/delete', methods=['POST'])
-@admin_required
-def api_admin_staff_delete(uid):
-    return _set_staff_status(uid, False, True, 'delete', 'Admin archived staff account')
+    return _set_staff_status(uid, True, False, 'reactivate', 'Admin activated staff account')
 
 @app.route('/api/admin/staff/<int:uid>/toggle', methods=['POST'])
 @admin_required
 def api_admin_staff_toggle(uid):
-    conn=_db(); c=conn.cursor(); c.execute('SELECT active,deleted_at FROM users WHERE id=? AND role IN ("staff","hod","admin") AND username!="ADMIN"',(uid,)); r=c.fetchone(); conn.close()
+    conn=_db(); c=conn.cursor(); c.execute('SELECT active FROM users WHERE id=? AND role IN ("staff","hod","admin") AND username!="ADMIN"',(uid,)); r=c.fetchone(); conn.close()
     if not r: return jsonify({'ok':False,'error':'Staff not found'}), 404
     if int(r[0] or 0)==1: return _set_staff_status(uid, False, False, 'deactivate', 'Admin deactivated staff account')
-    return _set_staff_status(uid, True, False, 'reactivate', 'Admin reactivated staff account')
+    return _set_staff_status(uid, True, False, 'reactivate', 'Admin activated staff account')
 
 @app.route('/api/admin/staff/sync', methods=['POST'])
 @admin_required
@@ -1338,8 +1333,8 @@ def api_admin_staff_import():
         pw=(row.get('password') or '').strip()
         profile=_staff_profile_payload(row, code, display, adv, is_hod, active)
         if ex:
-            c.execute("""UPDATE users SET display_name=?,staff_code=?,role='staff',is_hod=?,is_advisor=?,advisor_class=?,dob=?,gender=?,designation=?,department=?,qualification=?,address=?,date_of_joining=?,phone=?,email=?,active=?,deleted_at=CASE WHEN ?=1 THEN NULL ELSE deleted_at END WHERE id=?""",
-                      (display, code, is_hod, 1 if adv else 0, adv or None, profile['dob'], profile['gender'], profile['designation'], profile['department'], profile['qualification'], profile['address'], profile['date_of_joining'], profile['phone'], profile['email'], active, active, ex[0]))
+            c.execute("""UPDATE users SET display_name=?,staff_code=?,role='staff',is_hod=?,is_advisor=?,advisor_class=?,dob=?,gender=?,designation=?,department=?,qualification=?,address=?,date_of_joining=?,phone=?,email=?,active=?,deleted_at=NULL WHERE id=?""",
+                      (display, code, is_hod, 1 if adv else 0, adv or None, profile['dob'], profile['gender'], profile['designation'], profile['department'], profile['qualification'], profile['address'], profile['date_of_joining'], profile['phone'], profile['email'], active, ex[0]))
             if pw: c.execute('UPDATE users SET password=? WHERE id=?',(_hash_pw(pw),ex[0]))
             updated+=1
         else:
