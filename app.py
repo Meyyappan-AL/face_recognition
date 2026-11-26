@@ -60,6 +60,8 @@ os.makedirs(TIMETABLE_REF_DIR, exist_ok=True)
 os.makedirs(FACE_VIDEO_DIR, exist_ok=True)
 os.makedirs(FACE_CROP_DIR, exist_ok=True)
 TRAIN_STATUS_FILE = os.path.join(APP_DIR, "train_status.json")
+PROFILE_PHOTOS_DIR = os.path.join(UPLOADS_DIR, "profile_photos")
+os.makedirs(PROFILE_PHOTOS_DIR, exist_ok=True)
 
 COOLDOWN_SECONDS = 60
 CCTV_URL = 0
@@ -1014,6 +1016,37 @@ def add_student():
     audit_log('student', sid, 'add', None, {'name':name,'reg_no':reg_no,'class':cls,'roll':roll,'batch_year':batch,'study_year':study,'student_role':role}, details='Admin added student')
     return jsonify({'student_id':sid, 'reg_no':reg_no})
 
+def _save_profile_photo(student_id, file_storage):
+    if not file_storage or not file_storage.filename: return None
+    ext=os.path.splitext(secure_filename(file_storage.filename))[1].lower()
+    if ext not in ('.jpg','.jpeg','.png','.webp'): ext='.jpg'
+    for old_ext in ('.jpg','.jpeg','.png','.webp'):
+        old=os.path.join(PROFILE_PHOTOS_DIR, f'{int(student_id)}{old_ext}')
+        if os.path.exists(old):
+            try: os.remove(old)
+            except Exception: pass
+    path=os.path.join(PROFILE_PHOTOS_DIR, f'{int(student_id)}{ext}')
+    file_storage.save(path)
+    return path
+
+def _save_training_images(student_id, files, replace=False):
+    folder=os.path.join(DATASET_DIR,str(int(student_id))); os.makedirs(folder,exist_ok=True)
+    if replace and os.path.isdir(folder):
+        for fn in os.listdir(folder):
+            if fn.lower().endswith(('.jpg','.jpeg','.png','.webp')):
+                try: os.remove(os.path.join(folder,fn))
+                except Exception: pass
+    saved=0
+    for f in files or []:
+        if not f or not getattr(f,'filename',''): continue
+        try:
+            ext=os.path.splitext(secure_filename(f.filename or 'img.jpg'))[1].lower() or '.jpg'
+            if ext not in ('.jpg','.jpeg','.png','.webp'): ext='.jpg'
+            name=f"{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}_{saved}{ext}"
+            f.save(os.path.join(folder,name)); saved+=1
+        except Exception as e: app.logger.error('Save error: %s', e)
+    return saved
+
 @app.route('/upload_face', methods=['POST'])
 @admin_required
 def upload_face():
@@ -1024,16 +1057,34 @@ def upload_face():
     conn=_db(); c=conn.cursor(); c.execute('SELECT id,name,reg_no FROM students WHERE id=?', (student_id,)); st=c.fetchone(); conn.close()
     if not st: return jsonify({'error':'Student not found. Add student details first.'}), 404
     files = request.files.getlist('images[]')
-    if not files: return jsonify({'error':'No images received.'}), 400
-    saved=0; folder=os.path.join(DATASET_DIR,str(student_id)); os.makedirs(folder,exist_ok=True)
-    for f in files:
-        try:
-            ext=os.path.splitext(secure_filename(f.filename or 'img.jpg'))[1].lower() or '.jpg'
-            if ext not in ('.jpg','.jpeg','.png'): ext='.jpg'
-            f.save(os.path.join(folder, f"{datetime.datetime.utcnow().timestamp():.6f}_{saved}{ext}")); saved+=1
-        except Exception as e: app.logger.error('Save error: %s', e)
-    audit_log('student', student_id, 'upload_training_images', None, {'saved':saved,'reg_no':st[2]}, details='Face images uploaded for training')
-    return jsonify({'saved':saved, 'student_id':student_id, 'reg_no':st[2]})
+    replace=str(request.form.get('replace') or '').lower() in ('1','true','yes','on')
+    saved=_save_training_images(student_id, files, replace=replace)
+    if not saved: return jsonify({'error':'No training images received.'}), 400
+    audit_log('student', student_id, 'upload_training_images', None, {'saved':saved,'reg_no':st[2],'replace':replace}, details='Face training images uploaded')
+    return jsonify({'saved':saved, 'student_id':student_id, 'reg_no':st[2], 'replace':replace})
+
+@app.route('/api/admin/students/<int:sid>/profile_photo', methods=['POST'])
+@admin_required
+def api_admin_student_profile_photo(sid):
+    conn=_db(); c=conn.cursor(); c.execute('SELECT id,name FROM students WHERE id=?',(sid,)); st=c.fetchone(); conn.close()
+    if not st: return jsonify({'ok':False,'error':'Student not found'}), 404
+    f=request.files.get('photo')
+    if not f or not f.filename: return jsonify({'ok':False,'error':'Photo file required'}), 400
+    path=_save_profile_photo(sid,f)
+    audit_log('student', sid, 'profile_photo', None, {'file':os.path.basename(path)}, details='Admin uploaded profile photo')
+    return jsonify({'ok':True,'photo_url':f'/student_photo_safe/{sid}?t={int(datetime.datetime.utcnow().timestamp())}'})
+
+@app.route('/api/admin/students/<int:sid>/training_images', methods=['POST'])
+@admin_required
+def api_admin_student_training_images(sid):
+    conn=_db(); c=conn.cursor(); c.execute('SELECT id,name,reg_no FROM students WHERE id=?',(sid,)); st=c.fetchone(); conn.close()
+    if not st: return jsonify({'ok':False,'error':'Student not found'}), 404
+    files=request.files.getlist('images[]') or request.files.getlist('images')
+    replace=str(request.form.get('replace') or '').lower() in ('1','true','yes','on')
+    saved=_save_training_images(sid, files, replace=replace)
+    if not saved: return jsonify({'ok':False,'error':'No training images received'}), 400
+    audit_log('student', sid, 'upload_training_images', None, {'saved':saved,'replace':replace,'reg_no':st[2]}, details='Admin uploaded training images')
+    return jsonify({'ok':True,'saved':saved,'count':_student_training_count(sid),'replace':replace})
 
 @app.route('/students', methods=['GET'])
 @staff_required
@@ -1056,14 +1107,14 @@ def admin_students_page():
     rows=c.fetchall(); conn.commit(); conn.close()
     students=[]
     for r in rows:
-        folder=os.path.join(DATASET_DIR,str(r[0])); img_count=0
-        if os.path.isdir(folder): img_count=len([f for f in os.listdir(folder) if f.lower().endswith(('.jpg','.jpeg','.png'))])
+        img_count=_student_training_count(r[0])
+        has_profile=bool(_student_profile_photo_path(r[0]))
         students.append({'id':r[0],'name':r[1],'roll':r[2] or '','class':r[3] or '','section':r[4] or '',
                          'reg_no':r[5] or '','created_at':r[6] or '','dob':r[7] or '',
                          'email':r[8] or '','phone':r[9] or '','guardian_name':r[10] or '',
                          'guardian_phone':r[11] or '','active':int(r[12] or 0),'gender':r[13] or '',
                          'batch_year':r[14] or '','study_year':int(r[15] or 0) if r[15] else '',
-                         'student_role':r[16] or '','image_count':img_count})
+                         'student_role':r[16] or '','image_count':img_count,'has_profile_photo':has_profile})
     return render_template('students_list.html', students=students)
 
 @app.route('/admin/students/<int:sid>/attendance')
@@ -2251,11 +2302,9 @@ def api_admin_electives_import():
 @app.route('/student_photo/<int:sid>')
 @admin_required
 def student_photo(sid):
-    folder=os.path.join(DATASET_DIR,str(sid))
-    if not os.path.isdir(folder): abort(404)
-    files=[f for f in os.listdir(folder) if f.lower().endswith(('.jpg','.jpeg','.png'))]
-    if not files: abort(404)
-    files.sort(); return send_file(os.path.join(folder,files[-1]), mimetype='image/jpeg')
+    p=_student_profile_photo_path(sid)
+    if not p: abort(404)
+    return send_file(p)
 
 @app.route('/students/<int:sid>', methods=['DELETE'])
 @admin_required
@@ -2265,7 +2314,7 @@ def delete_student(sid):
     c.execute('DELETE FROM students WHERE id=?',(sid,))
     c.execute('DELETE FROM attendance WHERE student_id=?',(sid,))
     c.execute('DELETE FROM notifications WHERE student_id=?',(sid,))
-    for table in ('student_electives','student_alerts','notification_outbox','push_subscriptions'):
+    for table in ('student_electives','student_alerts','notification_outbox','push_subscriptions','attendance_entries'):
         try: c.execute(f'DELETE FROM {table} WHERE student_id=?',(sid,))
         except Exception: pass
     c.execute('DELETE FROM users WHERE student_id=? AND role="student"',(sid,))
@@ -2273,6 +2322,11 @@ def delete_student(sid):
     folder=os.path.join(DATASET_DIR,str(sid))
     if os.path.isdir(folder):
         shutil.rmtree(folder, ignore_errors=True)
+    for ext in ('.jpg','.jpeg','.png','.webp'):
+        p=os.path.join(PROFILE_PHOTOS_DIR,f'{int(sid)}{ext}')
+        if os.path.exists(p):
+            try: os.remove(p)
+            except Exception: pass
     audit_log('student', sid, 'delete', {'name':old[0],'reg_no':old[1],'class':old[2]} if old else None, None, details='Admin deleted student and linked records')
     return jsonify({'deleted':True})
 
@@ -3455,12 +3509,23 @@ def can_mark_period(class_name, date_str, period):
     disp=(cell or {}).get('display','')
     return False,f"Not assigned: {disp} (only listed/handling staff for this period; advisor own-class full day; HOD/admin override)."
 
-def _student_photo_path(sid):
-    folder=os.path.join(DATASET_DIR,str(sid))
+def _student_profile_photo_path(sid):
+    for ext in ('.jpg','.jpeg','.png','.webp'):
+        p=os.path.join(PROFILE_PHOTOS_DIR, f'{int(sid)}{ext}')
+        if os.path.exists(p): return p
+    folder=os.path.join(DATASET_DIR,str(int(sid)))
     if not os.path.isdir(folder): return None
-    files=[f for f in os.listdir(folder) if f.lower().endswith(('.jpg','.jpeg','.png'))]
+    files=[f for f in os.listdir(folder) if f.lower().endswith(('.jpg','.jpeg','.png','.webp'))]
     if not files: return None
     files.sort(); return os.path.join(folder,files[-1])
+
+def _student_photo_path(sid):
+    return _student_profile_photo_path(sid)
+
+def _student_training_count(sid):
+    folder=os.path.join(DATASET_DIR,str(int(sid)))
+    if not os.path.isdir(folder): return 0
+    return len([f for f in os.listdir(folder) if f.lower().endswith(('.jpg','.jpeg','.png','.webp'))])
 
 @app.route('/take_attendance')
 @staff_required
