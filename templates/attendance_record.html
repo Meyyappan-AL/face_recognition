@@ -1,63 +1,72 @@
 {% extends "base.html" %}
 {% block title %}Attendance Records{% endblock %}
 {% block content %}
-  <div class="container-fluid px-0 px-md-2">
-    {% if summary %}
-    <div class="row g-3 mb-3">
-      <div class="col-md-4"><div class="card p-3 shadow-sm text-center glass-card"><div class="text-muted small">Students (in view)</div><div class="fs-3 fw-bold">{{ summary.total }}</div></div></div>
-      <div class="col-md-4"><div class="card p-3 shadow-sm text-center border-success glass-card"><div class="text-muted small">Credited (P/Late/OD/ML)</div><div class="fs-3 fw-bold text-success">{{ summary.present }}</div></div></div>
-      <div class="col-md-4"><div class="card p-3 shadow-sm text-center border-danger glass-card"><div class="text-muted small">Absent/N-only (in view)</div><div class="fs-3 fw-bold text-danger">{{ summary.absent }}</div></div></div>
-    </div>
-    <div class="alert alert-secondary small py-2">{{ summary.note }}</div>
-    {% endif %}
-
-    <div class="card p-3 shadow-sm glass-card mb-3">
-      <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-        <h5 class="mb-0">Period Attendance Log (Manual updates reflected)</h5>
-      </div>
-      <form class="row g-2 mb-2 no-print" method="get" action="/attendance_record">
-        <div class="col-auto"><select name="semester_id" class="form-select form-select-sm" title="Semester">
-          <option value="">All time</option>
-          {% for s in semesters %}<option value="{{ s.id }}" {% if semester_id==s.id %}selected{% endif %}>{{ s.label }}{% if s.start_date %} | {{ s.start_date }}{% endif %}{% if s.end_date %} to {{ s.end_date }}{% endif %}</option>{% endfor %}
-        </select></div>
-        <div class="col-auto"><select name="period" class="form-select form-select-sm"><option value="daily" {% if period=='daily' %}selected{% endif %}>Today</option><option value="weekly" {% if period=='weekly' %}selected{% endif %}>Last 7 days</option><option value="monthly" {% if period=='monthly' %}selected{% endif %}>Last 30 days</option><option value="all" {% if period=='all' %}selected{% endif %}>All</option></select></div>
-        <div class="col-auto"><input type="date" name="from" class="form-control form-control-sm" value="{{ date_from or '' }}" title="From"></div>
-        <div class="col-auto"><input type="date" name="to" class="form-control form-control-sm" value="{{ date_to or '' }}" title="To"></div>
-        <div class="col-auto"><select name="class" class="form-select form-select-sm"><option value="" {% if not class_name %}selected{% endif %}>All classes</option>{% for c in erp_classes %}<option value="{{ c }}" {% if class_name==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
-        <div class="col-auto"><select name="absence" class="form-select form-select-sm" title="Absence filter">
-          <option value="any" {% if absence=='any' %}selected{% endif %}>Any absence day</option>
-          <option value="full_day" {% if absence=='full_day' %}selected{% endif %}>Full-day absent only</option>
-          <option value="partial_day" {% if absence=='partial_day' %}selected{% endif %}>Partial-day absent only</option>
-          <option value="period_wise" {% if absence=='period_wise' %}selected{% endif %}>Period-wise absence</option>
-          <option value="none" {% if absence=='none' %}selected{% endif %}>No absence</option>
-        </select></div>
-        <div class="col-auto"><button class="btn btn-sm btn-primary">Filter</button></div>
-      </form>
-      <div class="table-responsive" style="max-height:45vh;overflow:auto">
-        <table class="table table-sm table-striped table-hover align-middle">
-          <thead class="table-dark"><tr><th>Date</th><th>Class</th><th>Period</th><th>Subject</th><th>Student</th><th>Reg No</th><th>Status</th><th>Marked By</th><th>Updated</th><th>Elective</th></tr></thead>
-          <tbody>
-          {% for r in session_rows or [] %}
-            <tr>
-              <td>{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td><td>{{ r[3] }}</td><td>{{ rep_badge(session_roles.get(r[10])) }}{{ r[4] }}</td><td>{{ r[5] or '-' }}</td>
-              <td>{% if r[13]=='absent' %}<span class="badge bg-danger">{{ r[6] }}</span>{% elif r[13]=='unmarked' %}<span class="badge bg-secondary">-</span>{% elif r[13]=='present' %}<span class="badge bg-success">Present</span>{% elif r[13]=='late' %}<span class="badge bg-warning text-dark">Late</span>{% elif r[13]=='od' %}<span class="badge bg-primary">OD</span>{% elif r[13]=='medical' %}<span class="badge bg-info text-dark">Medical Leave</span>{% else %}<span class="badge bg-secondary">{{ r[6] }}</span>{% endif %}</td>
-              <td class="small">{{ r[7] or '-' }}</td><td class="small text-muted">{{ r[8] or '' }}</td><td class="small">{{ r[12] or '-' }}</td>
-            </tr>
-          {% else %}
-            <tr><td colspan="10" class="text-center text-muted">No submitted period attendance yet. Staff can mark via <a href="/take_attendance">Take Attendance</a>.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
+<div class="container-fluid px-0 px-md-2">
+  <div class="card erp-card p-3 mb-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+      <div><h5 class="erp-section-title mb-0">Attendance Records</h5><div class="erp-muted">Period-session attendance log and student summary. <code>-</code> is unmarked and excluded from totals; <code>N</code> counts as absent.</div></div>
+      <div class="d-flex gap-2 no-print">
+        <a class="btn btn-outline-primary btn-sm" id="exportCsv" href="/download_period_csv?period=all">Export CSV</a>
+        <a class="btn btn-outline-secondary btn-sm" href="/reports">Reports</a>
       </div>
     </div>
+    <form class="row g-2 no-print" method="get" action="/attendance_record" id="recordFilterForm">
+      <div class="col-6 col-md-2"><select name="semester_id" class="form-select form-select-sm"><option value="">All time</option>{% for s in semesters %}<option value="{{ s.id }}" {% if semester_id==s.id %}selected{% endif %}>{{ s.label }}</option>{% endfor %}</select></div>
+      <div class="col-6 col-md-2"><select name="period" class="form-select form-select-sm"><option value="daily" {% if period=='daily' %}selected{% endif %}>Today</option><option value="weekly" {% if period=='weekly' %}selected{% endif %}>Last 7 days</option><option value="monthly" {% if period=='monthly' %}selected{% endif %}>Last 30 days</option><option value="all" {% if period=='all' %}selected{% endif %}>All</option></select></div>
+      <div class="col-6 col-md-2"><input type="date" name="from" class="form-control form-control-sm" value="{{ date_from or '' }}"></div>
+      <div class="col-6 col-md-2"><input type="date" name="to" class="form-control form-control-sm" value="{{ date_to or '' }}"></div>
+      <div class="col-6 col-md-2"><select name="class" class="form-select form-select-sm"><option value="" {% if not class_name %}selected{% endif %}>All classes</option>{% for c in erp_classes %}<option value="{{ c }}" {% if class_name==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+      <div class="col-6 col-md-1"><select name="absence" class="form-select form-select-sm"><option value="any" {% if absence=='any' %}selected{% endif %}>Any</option><option value="full_day" {% if absence=='full_day' %}selected{% endif %}>Full-day</option><option value="partial_day" {% if absence=='partial_day' %}selected{% endif %}>Partial</option><option value="period_wise" {% if absence=='period_wise' %}selected{% endif %}>Period</option><option value="none" {% if absence=='none' %}selected{% endif %}>No absence</option></select></div>
+      <div class="col-12 col-md-1"><button class="btn btn-sm btn-primary w-100">Filter</button></div>
+    </form>
+  </div>
 
-    <div class="card p-3 shadow-sm glass-card mb-3">
-      <h5 class="mb-2">Student Summary (selected view)</h5>
-      <div class="table-responsive"><table class="table table-sm table-striped align-middle"><thead class="table-dark"><tr><th>Name</th><th>Reg No</th><th>Class</th><th>Credited (P/Late/OD/ML)</th><th>Absent/N</th><th>Total</th><th>%</th></tr></thead><tbody>
-      {% for r in report_rows or [] %}
-        <tr><td>{{ rep_badge(r.student_role) }}{{ r.name }}</td><td>{{ r.reg_no }}</td><td>{{ r.class }}</td><td>{{ r.present }}</td><td>{{ r.absent }}</td><td>{{ r.total }}</td><td><strong>{{ r.pct }}%</strong></td></tr>
-      {% else %}<tr><td colspan="7" class="text-center text-muted">No summary data.</td></tr>{% endfor %}
-      </tbody></table></div>
+  {% if summary %}
+  <div class="row g-2 mb-3">
+    <div class="col-6 col-md-3"><div class="card erp-card p-2 erp-kpi"><div class="label">Students</div><div class="value">{{ summary.total }}</div><div class="sub">in summary</div></div></div>
+    <div class="col-6 col-md-3"><div class="card erp-card p-2 erp-kpi"><div class="label">Credited</div><div class="value text-success">{{ summary.present }}</div><div class="sub">P/Late/OD/ML</div></div></div>
+    <div class="col-6 col-md-3"><div class="card erp-card p-2 erp-kpi"><div class="label">Absent/N only</div><div class="value text-danger">{{ summary.absent }}</div><div class="sub">no credited rows</div></div></div>
+    <div class="col-6 col-md-3"><div class="card erp-card p-2 erp-kpi"><div class="label">Rows</div><div class="value">{{ session_rows|length }}</div><div class="sub">period log rows</div></div></div>
+  </div>
+  <div class="alert alert-secondary small py-2">{{ summary.note }}</div>
+  {% endif %}
+
+  <div class="card erp-card p-3 mb-3">
+    <h5 class="erp-section-title mb-2">Period Log</h5>
+    <div class="erp-table-wrap" style="max-height:45vh">
+      <table class="table table-sm erp-table align-middle mb-0">
+        <thead><tr><th>Date</th><th>Class</th><th>P</th><th>Subject</th><th>Student</th><th>Reg No</th><th>Status</th><th>Marked By</th><th>Updated</th></tr></thead>
+        <tbody>
+        {% for r in session_rows or [] %}
+          <tr>
+            <td>{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td><td class="small">{{ r[3] }}</td><td>{{ rep_badge(session_roles.get(r[10])) }}{{ r[4] }}</td><td class="small">{{ r[5] or '-' }}</td>
+            <td>{% if r[13]=='absent' %}<span class="badge bg-danger">{{ r[6] }}</span>{% elif r[13]=='unmarked' %}<span class="badge bg-secondary">-</span>{% elif r[13]=='present' %}<span class="badge bg-success">Present</span>{% elif r[13]=='late' %}<span class="badge bg-warning text-dark">Late</span>{% elif r[13]=='od' %}<span class="badge bg-primary">OD</span>{% elif r[13]=='medical' %}<span class="badge bg-info text-dark">Medical Leave</span>{% else %}<span class="badge bg-secondary">{{ r[6] }}</span>{% endif %}</td>
+            <td class="small">{{ r[7] or '-' }}</td><td class="small text-muted">{{ r[8] or '' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" class="erp-empty">No attendance records for this filter.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
+
+  <div class="card erp-card p-3">
+    <h5 class="erp-section-title mb-2">Student Summary</h5>
+    <div class="erp-table-wrap"><table class="table table-sm erp-table align-middle mb-0"><thead><tr><th>Name</th><th>Reg No</th><th>Class</th><th>Credited</th><th>Absent/N</th><th>Total</th><th>%</th></tr></thead><tbody>
+    {% for r in report_rows or [] %}
+      <tr><td>{{ rep_badge(r.student_role) }}{{ r.name }}</td><td>{{ r.reg_no }}</td><td>{{ r.class }}</td><td>{{ r.present }}</td><td>{{ r.absent }}</td><td>{{ r.total }}</td><td class="fw-bold {{ 'text-danger' if r.pct < 75 else 'text-success' }}">{{ r.pct }}%</td></tr>
+    {% else %}<tr><td colspan="7" class="erp-empty">No summary data.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const form=document.getElementById('recordFilterForm'); if(!form) return;
+  const q=new URLSearchParams(new FormData(form)); const qs=q.toString();
+  const a=document.getElementById('exportCsv'); if(a) a.href='/download_period_csv?'+qs;
+})();
+</script>
 {% endblock %}

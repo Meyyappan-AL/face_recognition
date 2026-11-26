@@ -1117,65 +1117,62 @@ def admin_students_page():
                          'student_role':r[16] or '','image_count':img_count,'has_profile_photo':has_profile})
     return render_template('students_list.html', students=students)
 
+def _admin_student_attendance_data(sid, semester_id='', date_from='', date_to='', status='', period=''):
+    conn=_db(); c=conn.cursor(); _ensure_student_year_columns(c); _ensure_student_role_column(c)
+    row=c.execute('SELECT id,name,class,section,reg_no,batch_year,study_year,gender,active,student_role FROM students WHERE id=?',(sid,)).fetchone()
+    if not row: conn.close(); return None,[],{},{}
+    student={'id':row[0],'name':row[1],'class':row[2] or '','section':row[3] or '','reg_no':row[4] or '','batch_year':row[5] or '','study_year':row[6] or '','gender':row[7] or '','active':int(row[8] or 0),'student_role':row[9] or ''}
+    sem=_semester_by_id(semester_id) if semester_id else None
+    if sem and not date_from and not date_to:
+        wf,wt=_semester_window(sem,student['class']); date_from=wf.isoformat(); date_to=wt.isoformat()
+    where=['e.student_id=?']; params=[sid]
+    if date_from: where.append('s.date>=?'); params.append(date_from)
+    if date_to: where.append('s.date<=?'); params.append(date_to)
+    if status:
+        stf='-' if status.strip()=='-' else _normalize_attendance_status(status)
+        where.append('COALESCE(e.status,"")=?'); params.append(stf)
+    if period:
+        try: where.append('s.period=?'); params.append(int(period))
+        except Exception: period=''
+    rows=c.execute("SELECT s.date,s.period,s.subject_display,s.class_name,e.status,e.marked_by,e.source,e.updated_at,s.submitted_at,COALESCE(NULLIF(e.elective_label,''),s.subject_display,s.subject) FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id WHERE "+' AND '.join(where)+" ORDER BY s.date DESC,s.period DESC,e.updated_at DESC LIMIT 2000",params).fetchall(); conn.close()
+    details=[]; total=credited=absent=late=od=medical=unmarked=0
+    for r in rows:
+        st=_normalize_attendance_status(r[4]); sk=_analytics_status_key(st)
+        if sk=='unmarked': unmarked+=1
+        else:
+            total+=1
+            if sk in ('present','late','od','medical'): credited+=1
+            if sk=='absent': absent+=1
+            if sk=='late': late+=1
+            if sk=='od': od+=1
+            if sk=='medical': medical+=1
+        details.append({'date':r[0] or '','period':r[1] or '','subject':r[9] or r[2] or '','class':r[3] or '','status':st,'status_key':sk,'marked_by':r[5] or '','source':r[6] or '','updated_at':r[7] or '','submitted_at':r[8] or ''})
+    summary={'total':total,'credited':credited,'absent':absent,'late':late,'od':od,'medical':medical,'unmarked':unmarked,'percentage':round((credited/total*100) if total else 0,2)}
+    filters={'semester_id':semester_id,'date_from':date_from,'date_to':date_to,'status':_normalize_attendance_status(status) if status else '','period':str(period) if period else ''}
+    return student,details,summary,filters
+
 @app.route('/admin/students/<int:sid>/attendance')
 @admin_required
 def admin_student_attendance(sid):
-    conn=_db(); c=conn.cursor()
-    _ensure_student_year_columns(c)
-    _ensure_student_role_column(c)
-    row=c.execute('SELECT id,name,class,section,reg_no,batch_year,study_year,gender,active,student_role FROM students WHERE id=?', (sid,)).fetchone()
-    if not row:
-        conn.close(); abort(404)
-    student={'id':row[0],'name':row[1],'class':row[2] or '','section':row[3] or '','reg_no':row[4] or '',
-             'batch_year':row[5] or '','study_year':row[6] or '','gender':row[7] or '','active':int(row[8] or 0),
-             'student_role':row[9] or ''}
-    semester_id=_norm(request.args.get('semester_id'))
-    date_from=_norm(request.args.get('from'))
-    date_to=_norm(request.args.get('to'))
-    status=_norm(request.args.get('status'))
-    period=_norm(request.args.get('period'))
-    where=['e.student_id=?']; params=[sid]
-    if semester_id:
-        sem=_semester_by_id(semester_id)
-        if sem:
-            win_from,win_to=_semester_window(sem,student['class'])
-            where.append('s.date>=?'); params.append(win_from.isoformat())
-            where.append('s.date<=?'); params.append(win_to.isoformat())
-    if date_from:
-        where.append('s.date>=?'); params.append(date_from)
-    if date_to:
-        where.append('s.date<=?'); params.append(date_to)
-    if status:
-        where.append('lower(e.status)=lower(?)'); params.append(status)
-    if period:
-        try:
-            where.append('s.period=?'); params.append(int(period))
-        except Exception:
-            period=''
-    rows=c.execute('''SELECT s.date,s.period,s.subject_display,s.class_name,e.status,e.marked_by,e.source,e.updated_at,s.submitted_at
-                      FROM attendance_entries e JOIN attendance_sessions s ON s.id=e.session_id
-                      WHERE ''' + ' AND '.join(where) + ' ORDER BY s.date DESC,s.period DESC,e.updated_at DESC LIMIT 1000', params).fetchall()
-    conn.close()
-    details=[]
-    total=credited=absent=0
-    for r in rows:
-        st=_normalize_attendance_status(r[4])
-        if st==UNMARKED_STATUS:
-            details.append({'date':r[0] or '','period':r[1] or '', 'subject':r[2] or '', 'class':r[3] or '',
-                            'status':st,'marked_by':r[5] or '','source':r[6] or '','updated_at':r[7] or '','submitted_at':r[8] or ''})
-            continue
-        total+=1
-        if _is_attendance_credited(st):
-            credited+=1
-        elif _is_attendance_absence(st):
-            absent+=1
-        details.append({'date':r[0] or '','period':r[1] or '', 'subject':r[2] or '', 'class':r[3] or '',
-                        'status':st,'marked_by':r[5] or '','source':r[6] or '','updated_at':r[7] or '','submitted_at':r[8] or ''})
-    summary={'total':total,'credited':credited,'absent':absent,
-             'percentage':round((credited/total*100) if total else 0,2)}
+    semester_id=_norm(request.args.get('semester_id')); date_from=_norm(request.args.get('from')); date_to=_norm(request.args.get('to')); status=_norm(request.args.get('status')); period=_norm(request.args.get('period'))
+    student,details,summary,filters=_admin_student_attendance_data(sid,semester_id,date_from,date_to,status,period)
+    if not student: abort(404)
     return render_template('admin_student_attendance.html', student=student, details=details, summary=summary,
-                           semesters=[_semester_json(s) for s in _semester_rows()], semester_id=semester_id,
-                           date_from=date_from, date_to=date_to, status=status, period=str(period) if period else '')
+                           semesters=[_semester_json(s) for s in _semester_rows()], semester_id=filters['semester_id'],
+                           date_from=filters['date_from'], date_to=filters['date_to'], status=filters['status'], period=filters['period'])
+
+@app.route('/admin/students/<int:sid>/attendance/export')
+@admin_required
+def admin_student_attendance_export(sid):
+    semester_id=_norm(request.args.get('semester_id')); date_from=_norm(request.args.get('from')); date_to=_norm(request.args.get('to')); status=_norm(request.args.get('status')); period=_norm(request.args.get('period'))
+    student,details,_summary,_filters=_admin_student_attendance_data(sid,semester_id,date_from,date_to,status,period)
+    if not student: abort(404)
+    output=io.StringIO(); output.write('Date,Period,Class,Subject,Status,Source,MarkedBy,Updated,Submitted\n')
+    for d in details:
+        output.write(','.join('"'+str(x or '').replace('"','""')+'"' for x in [d['date'],d['period'],d['class'],d['subject'],d['status'],d['source'],d['marked_by'],d['updated_at'],d['submitted_at']])+'\n')
+    mem=io.BytesIO(output.getvalue().encode('utf-8-sig')); mem.seek(0)
+    return send_file(mem, as_attachment=True, download_name=f"student_{student.get('reg_no') or sid}_attendance.csv", mimetype='text/csv')
+
 
 # --- Admin: staff / HOD / advisor management ---
 @app.route('/admin/staff')
@@ -3268,7 +3265,7 @@ def attendance_record():
     if session.get('role')!='admin': note+=' Staff view covers only sessions handled/submitted by you.'
     return render_template('attendance_record.html', session_rows=session_rows, session_roles=session_roles, period=period, class_name=cls, report_rows=report_rows,
                            semesters=[_semester_json(s) for s in _semester_rows()], semester_id=(sem or {}).get('id'), absence=absence,
-                           date_from=report_from, date_to=report_to,
+                           date_from=report_from, date_to=report_to, erp_classes=get_classes(),
                            summary={'total':total,'present':present,'absent':absent,'note':note})
 
 @app.route('/download_csv', methods=['GET'])
@@ -6497,9 +6494,9 @@ def download_defaulters_csv():
     mem=io.BytesIO(out.getvalue().encode('utf-8-sig')); mem.seek(0)
     return send_file(mem, as_attachment=True, download_name='defaulters.csv', mimetype='text/csv')
 
-_face_recover_interrupted_jobs()
-_start_notify_worker()
-_start_absence_worker()
+if callable(globals().get('_face_recover_interrupted_jobs')): _face_recover_interrupted_jobs()
+if callable(globals().get('_start_notify_worker')): _start_notify_worker()
+if callable(globals().get('_start_absence_worker')): _start_absence_worker()
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')
