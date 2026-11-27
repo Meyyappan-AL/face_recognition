@@ -1,6 +1,6 @@
 ﻿# PROJECT.md
 
-Last updated: 2026-11-18
+Last updated: 2026-11-27
 
 This file is the source of truth for continuing the ERP project in a new chat. Read this first, then run the verification commands near the bottom before making changes.
 
