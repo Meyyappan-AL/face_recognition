@@ -82,6 +82,9 @@ FACE_VIDEO_MAX_SECONDS = int(os.environ.get('ERP_FACE_VIDEO_MAX_SECONDS') or 360
 FACE_VIDEO_MAX_FACES = max(1, int(os.environ.get('ERP_FACE_VIDEO_MAX_FACES') or 80))
 FACE_UNKNOWN_MAX_GROUPS = max(1, int(os.environ.get('ERP_FACE_UNKNOWN_MAX_GROUPS') or 300))
 FACE_JOB_VIDEO_TTL_HOURS = int(os.environ.get('ERP_FACE_VIDEO_TTL_HOURS') or 24)
+FACE_AUTOSCAN_STABLE = max(2, int(os.environ.get('ERP_FACE_AUTOSCAN_STABLE') or 3))
+FACE_AUTOSCAN_COOLDOWN_SEC = max(30, min(60, int(os.environ.get('ERP_FACE_AUTOSCAN_COOLDOWN_SEC') or 45)))
+_face_autoscan_state = {}  # job_id -> {sid: {'streak':n,'last_mark_ts':epoch,'last_seen_ts':epoch}}
 PROTOTYPE_MODE = False  # data persistent (per user confirmation)
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -3072,6 +3075,72 @@ def api_admin_face_webcam_start():
     return jsonify(ok=True, job=_face_client_job(job_id))
 
 
+def _face_autoscan_mark(job, sid, conf):
+    cls=(job.get('class_name') or '').strip(); date=(job.get('date') or '').strip(); period=job.get('period')
+    try: period=int(period)
+    except Exception: return False, 'Invalid period'
+    ok,reason=can_mark_period(cls,date,period)
+    if not ok: return False, reason
+    cell=timetable_cell(cls,date,period) or {}
+    if not cell: return False, 'No current timetable slot'
+    edit_allowed, edit_reason = attendance_edit_allowed(date)
+    if not edit_allowed: return False, edit_reason
+    conn=_db(); c=conn.cursor()
+    try:
+        c.execute('SELECT id,name,reg_no,class,student_role FROM students WHERE id=? AND upper(class)=upper(?) AND (active IS NULL OR active=1)',(sid,cls))
+        st=c.fetchone()
+        if not st: return False, 'Student not in class'
+        _, sname, reg, scls, _srole = st
+        disp=(cell.get('display') or cell.get('subject') or '').strip(); subj=(cell.get('subject') or disp).strip()
+        version=_timetable_version_row(cls,date); version_id=int(version['id']) if version else None
+        tt=load_timetable(cls,date) or {}; duration=_slot_duration_minutes(tt,period)
+        marked_by=session.get('display_name') or session.get('username') or 'admin'; now=_now_iso()
+        c.execute('SELECT id FROM attendance_sessions WHERE class_name=? AND date=? AND period=? AND subject_display=?',(cls,date,period,disp))
+        row=c.fetchone()
+        if row:
+            sess_id=row[0]
+            c.execute('UPDATE attendance_sessions SET subject=?,subject_display=?,staff_code=?,staff_name=?,status=?,source=?,submitted_at=?,timetable_version_id=?,duration_minutes=? WHERE id=?',
+                      (subj,disp,session.get('staff_code'),marked_by,'submitted','face_attendance',now,version_id,duration,sess_id))
+        else:
+            c.execute('INSERT INTO attendance_sessions (class_name,date,period,subject,subject_display,staff_code,staff_name,status,source,created_at,submitted_at,notes,timetable_version_id,duration_minutes) VALUES (?,?,?,?,?,?,?, "submitted",?,?,?,?,?,?)',
+                      (cls,date,period,subj,disp,session.get('staff_code'),marked_by,'face_attendance',now,now,'Auto-scan face attendance',version_id,duration))
+            sess_id=c.lastrowid
+        # locks
+        od_approved=False; medical_approved=False
+        try:
+            c.execute("SELECT 1 FROM od_records WHERE student_id=? AND class_name=? AND date=? AND period=? AND status='OD' LIMIT 1",(sid,cls,date,period))
+            od_approved=bool(c.fetchone())
+        except Exception: pass
+        try:
+            c.execute("SELECT 1 FROM medical_records WHERE student_id=? AND class_name=? AND date=? AND period=? AND status='Medical Leave' LIMIT 1",(sid,cls,date,period))
+            medical_approved=bool(c.fetchone())
+        except Exception: pass
+        c.execute('SELECT status,source,elective_label FROM attendance_entries WHERE session_id=? AND student_id=?',(sess_id,sid))
+        prev=c.fetchone(); prev_st=_normalize_attendance_status(prev[0] if prev else None); prev_src=(prev[1] if prev else '')
+        if od_approved or (prev_st=='OD' and prev_src=='od_workflow'): return False, 'OD locked'
+        if medical_approved or (prev_st=='Medical Leave' and prev_src=='medical_workflow'): return False, 'Medical Leave locked'
+        if prev_st!=UNMARKED_STATUS and not edit_allowed: return False, edit_reason
+        elabel=''
+        if cell.get('options'):
+            emaps=_elective_lookup(); elabel=_effective_subject(emaps,sid,cls,date,period,prev[2] if prev else '',version_id)
+            if session.get('role')=='staff' and not (session.get('is_hod') or session.get('role')=='admin'):
+                allowed=_elective_allowed_staff_codes(((_elective_offering_map(cls).get(_period_slot_key(period,date)) or {})), elabel, cell)
+                if allowed and (session.get('username','').upper() not in allowed): return False, 'Mapped elective staff only'
+        c.execute("INSERT INTO attendance_entries (session_id,student_id,reg_no,student_name,status,confidence,flagged,source,marked_by,updated_at,elective_label) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,student_id) DO UPDATE SET reg_no=excluded.reg_no,student_name=excluded.student_name,status=excluded.status,confidence=excluded.confidence,flagged=excluded.flagged,source=excluded.source,marked_by=excluded.marked_by,updated_at=excluded.updated_at,elective_label=COALESCE(NULLIF(excluded.elective_label,''),attendance_entries.elective_label)",
+                  (sess_id,sid,reg,sname,'Present',max(0.0,min(1.0,float(conf or 0))),0,'face_attendance',marked_by,now,elabel))
+        conn.commit()
+        try:
+            _enqueue_alert(sid, 'attendance_marked', 'Attendance marked', f'Present: {cls} {date} P{period} {disp}'.strip(), event_key='face_auto', source_ref=f'face_auto:{sess_id}:{sid}')
+        except Exception: pass
+        return True, 'marked'
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        return False, str(e)
+    finally:
+        try: conn.close()
+        except Exception: pass
+
 @app.route('/api/admin/face/jobs/<int:job_id>/frame', methods=['POST'])
 @admin_required
 def api_admin_face_job_frame(job_id):
@@ -3088,9 +3157,14 @@ def api_admin_face_job_frame(job_id):
         return jsonify(ok=False, error='No webcam image received.'), 400
     if len(data) > FACE_WEBCAM_MAX_MB * 1024 * 1024:
         return jsonify(ok=False, error=f'Webcam image exceeds {FACE_WEBCAM_MAX_MB} MB.'), 400
-    detections = _recognize_faces_image(data, max_faces=1)
+    autoscan = str(request.form.get('autoscan') or request.args.get('autoscan') or '').lower() in ('1','true','yes','on')
+    detections = _recognize_faces_image(data, max_faces=(FACE_VIDEO_MAX_FACES if autoscan else 1))
     roster = _face_roster_map(job['class_name'])
     conn = _db(); c = conn.cursor()
+    auto_marked=[]; auto_skipped=[]
+    now_ts=time.time()
+    state=_face_autoscan_state.setdefault(int(job_id),{})
+    seen=set(); det_conf={}
     for det in detections:
         sid = det.get('predicted_student_id')
         conf = float(det.get('confidence') or 0.0)
@@ -3099,15 +3173,32 @@ def api_admin_face_job_frame(job_id):
             _face_upsert_detection(conn, job_id, f'student:{sid}', 'student', sid, info.get('name'), info.get('reg_no'),
                                    conf, 1, 1 if conf < FACE_MATCH_REVIEW_CONFIDENCE else 0,
                                    _face_encode_crop(det.get('crop')), det.get('bbox'), None)
+            if autoscan:
+                sid_i=int(sid); seen.add(sid_i); det_conf[sid_i]=max(det_conf.get(sid_i,0.0), conf)
         else:
-            _face_upsert_detection(conn, job_id, 'unknown:webcam', 'unknown', None, None, None,
+            _face_upsert_detection(conn, job_id, f'unknown:webcam:{int(now_ts*1000)}', 'unknown', None, None, None,
                                    conf, 1, 1, _face_encode_crop(det.get('crop')), det.get('bbox'), None)
+    if autoscan:
+        for sid_k, st in list(state.items()):
+            if sid_k not in seen:
+                st['streak']=0
+        for sid in seen:
+            st=state.setdefault(sid, {'streak':0,'last_mark_ts':0,'last_seen_ts':0})
+            st['streak']=int(st.get('streak',0))+1; st['last_seen_ts']=now_ts
+            if st['streak']>=FACE_AUTOSCAN_STABLE and (now_ts-float(st.get('last_mark_ts',0) or 0))>=FACE_AUTOSCAN_COOLDOWN_SEC:
+                ok_m, msg_m = _face_autoscan_mark(job, sid, det_conf.get(sid, 0.0))
+                if ok_m:
+                    st['last_mark_ts']=now_ts; st['streak']=0
+                    auto_marked.append({'student_id':sid,'name':roster.get(sid,{}).get('name'),'reg_no':roster.get(sid,{}).get('reg_no')})
+                else:
+                    auto_skipped.append({'student_id':sid,'reason':msg_m})
     _face_refresh_counts(c, job_id)
     c.execute("""UPDATE face_attendance_jobs SET frames_scanned=COALESCE(frames_scanned,0)+1,
                         faces_detected=COALESCE(faces_detected,0)+? WHERE id=?""",
               (len(detections), job_id))
     conn.commit(); conn.close()
     return jsonify(ok=True, detected=len(detections), job=_face_client_job(job_id),
+                   auto_marked=auto_marked, auto_skipped=auto_skipped, autoscan=autoscan,
                    warning=None if detections else 'No face detected. Ask the student to face the camera and retry.')
 
 

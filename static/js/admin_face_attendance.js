@@ -15,6 +15,9 @@
   let streamPromise = null;
   let pollTimer = null;
   let captureBusy = false;
+  let autoScan = false;
+  let autoScanTimer = null;
+  let autoScanBusy = false;
   let latestVideoJobId = null;
   let cameraNote = 'Camera idle.';
   let cameraNoteType = 'muted';
