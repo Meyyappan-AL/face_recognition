@@ -272,9 +272,9 @@ def _timetable_version_row(class_name, on_date=None):
     conn=_db(); c=conn.cursor()
     try:
         c.execute("""SELECT id,class_name,semester_id,version_no,effective_from,effective_to,
-                            timetable_json,reference_path,reference_name,is_active,created_by,created_at,updated_at,notes
+                            timetable_json,reference_path,reference_name,is_active,created_by,created_at,updated_at,notes,hidden,hidden_at,hidden_by
                      FROM timetable_versions
-                     WHERE upper(class_name)=upper(?)
+                     WHERE upper(class_name)=upper(?) AND COALESCE(hidden,0)=0
                        AND effective_from<=?
                        AND (effective_to IS NULL OR effective_to='' OR effective_to>=?)
                      ORDER BY effective_from DESC, version_no DESC LIMIT 1""",
@@ -282,7 +282,7 @@ def _timetable_version_row(class_name, on_date=None):
         row=c.fetchone()
         if not row: return None
         keys=['id','class_name','semester_id','version_no','effective_from','effective_to',
-              'timetable_json','reference_path','reference_name','is_active','created_by','created_at','updated_at','notes']
+              'timetable_json','reference_path','reference_name','is_active','created_by','created_at','updated_at','notes','hidden','hidden_at','hidden_by']
         return dict(zip(keys,row))
     except Exception:
         return None
@@ -504,6 +504,8 @@ def init_db():
                     UNIQUE(class_name, semester_id, version_no)
                 )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_timetable_versions_lookup ON timetable_versions(class_name, effective_from, effective_to)")
+    for col,coldef in [('hidden','INTEGER DEFAULT 0'),('hidden_at','TEXT'),('hidden_by','TEXT')]:
+        _ensure_column(c,'timetable_versions',col,coldef)
     c.execute("""CREATE TABLE IF NOT EXISTS attendance_audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     actor_role TEXT, actor_user TEXT, actor_name TEXT,
@@ -543,6 +545,17 @@ def init_db():
     except Exception:
         pass
     c.execute("CREATE INDEX IF NOT EXISTS idx_student_electives_lookup ON student_electives(student_id,class_name,timetable_version_id,slot_key)")
+    c.execute("""CREATE TABLE IF NOT EXISTS elective_offerings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    class_name TEXT NOT NULL,
+                    timetable_version_id INTEGER NOT NULL,
+                    slot_key TEXT NOT NULL,
+                    option_label TEXT NOT NULL,
+                    staff_codes TEXT DEFAULT '',
+                    updated_at TEXT, updated_by TEXT,
+                    UNIQUE(class_name,timetable_version_id,slot_key,option_label)
+                )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_elective_offerings_lookup ON elective_offerings(class_name,timetable_version_id,slot_key)")
     c.execute("""CREATE TABLE IF NOT EXISTS student_alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     student_id INTEGER NOT NULL, alert_type TEXT, title TEXT, body TEXT,
@@ -630,7 +643,7 @@ def sync_staff_from_timetables(reset_passwords=False):
     conn = _db(); c = conn.cursor(); now = datetime.datetime.utcnow().isoformat()
     added = updated = 0
     for code, info in staff_map.items():
-        display = _norm(info.get('name') or code)
+        n=info.get('name') if isinstance(info,dict) else info; display=_norm((n.get('name') if isinstance(n,dict) else n) or code)
         username = code.upper(); is_hod = 1 if code == HOD_STAFF_CODE else 0; adv = advisors.get(code)
         adv_class = canonical_class_name((adv or {}).get('class') or '')
         c.execute('SELECT id,password,active,deleted_at,role,display_name FROM users WHERE upper(username)=upper(?) OR upper(staff_code)=upper(?) ORDER BY id LIMIT 1', (username, code))
@@ -1422,6 +1435,7 @@ def _timetable_version_json(row, include_data=False):
         'reference_path':row.get('reference_path') or '',
         'reference_name':row.get('reference_name') or '',
         'reference_url':f"/admin/timetable/reference/{row.get('id')}" if row.get('reference_path') else '',
+        'hidden':int(row.get('hidden') or 0),'hidden_at':row.get('hidden_at') or '','hidden_by':row.get('hidden_by') or '',
         'status':_timetable_version_status(row)
     }
     if include_data:
@@ -1429,17 +1443,19 @@ def _timetable_version_json(row, include_data=False):
         except Exception: out['data']={}
     return out
 
-def _timetable_version_rows(class_name=None, semester_id=None):
+def _timetable_version_rows(class_name=None, semester_id=None, include_hidden=False):
     conn=_db(); c=conn.cursor(); rows=[]
     try:
         q="""SELECT id,class_name,semester_id,version_no,effective_from,effective_to,timetable_json,
-                    reference_path,reference_name,is_active,created_by,created_at,updated_at,notes
+                    reference_path,reference_name,is_active,created_by,created_at,updated_at,notes,hidden,hidden_at,hidden_by
              FROM timetable_versions WHERE 1=1"""
         params=[]
         if class_name:
             q+=" AND upper(class_name)=upper(?)"; params.append(_norm(class_name))
         if semester_id is not None:
             q+=" AND semester_id=?"; params.append(int(semester_id))
+        if not include_hidden:
+            q+=" AND COALESCE(hidden,0)=0"
         q+=" ORDER BY effective_from DESC, version_no DESC, id DESC"
         c.execute(q,params); rows=c.fetchall()
     except Exception:
@@ -1447,7 +1463,7 @@ def _timetable_version_rows(class_name=None, semester_id=None):
     finally:
         conn.close()
     keys=['id','class_name','semester_id','version_no','effective_from','effective_to','timetable_json',
-          'reference_path','reference_name','is_active','created_by','created_at','updated_at','notes']
+          'reference_path','reference_name','is_active','created_by','created_at','updated_at','notes','hidden','hidden_at','hidden_by']
     return [dict(zip(keys,r)) for r in rows]
 
 def _write_timetable_json_file(class_name, payload):
@@ -1638,7 +1654,7 @@ def api_admin_timetable_versions():
     else:
         sem=_current_semester()
         sem_id=int(sem['id']) if sem else None
-    rows=_timetable_version_rows(cls or None,sem_id)
+    rows=_timetable_version_rows(cls or None,sem_id,include_hidden=True)
     versions=[_timetable_version_json(r) for r in rows]
     return jsonify({'ok':True,'class':cls,'semester_id':sem_id,'versions':versions})
 
@@ -1772,6 +1788,27 @@ def api_admin_timetable_version_restore(version_id):
                   details='Admin restored timetable version')
         return jsonify(res)
     return jsonify(res), 400
+
+@app.route('/api/admin/timetable/versions/<int:version_id>/hide', methods=['POST'])
+@admin_required
+def api_admin_timetable_version_hide(version_id):
+    data=request.get_json(silent=True) or {}
+    hide=bool(data.get('hidden', True))
+    conn=_db(); c=conn.cursor()
+    try:
+        c.execute("SELECT id,class_name,version_no FROM timetable_versions WHERE id=?",(version_id,))
+        row=c.fetchone()
+        if not row: return jsonify({'ok':False,'error':'Timetable version not found.'}), 404
+        now=_now_iso(); who=session.get('username') or session.get('display_name') or 'admin'
+        c.execute("UPDATE timetable_versions SET hidden=?, hidden_at=?, hidden_by=?, updated_at=? WHERE id=?",
+                  (1 if hide else 0, now if hide else None, who if hide else None, now, version_id))
+        conn.commit(); conn.close()
+        audit_log('timetable', row[1], 'version_hide' if hide else 'version_unhide', str(version_id), {'hidden':hide}, details=f'Admin {"hid" if hide else "unhid"} timetable version v{row[2]}')
+        return jsonify({'ok':True,'hidden':1 if hide else 0})
+    except Exception as e:
+        try: conn.close()
+        except Exception: pass
+        return jsonify({'ok':False,'error':str(e)}), 400
 
 @app.route('/api/admin/timetable/reference', methods=['POST'])
 @admin_required
@@ -2055,6 +2092,56 @@ def _apply_elective_map_to_schedule(schedule, emap):
         out[day]=new_cells
     return out
 
+
+
+def _elective_offering_map(class_name, version_id=None):
+    conn=_db(); c=conn.cursor(); out={}
+    try:
+        if version_id is None: return out
+        c.execute("SELECT slot_key,option_label,staff_codes FROM elective_offerings WHERE upper(class_name)=upper(?) AND timetable_version_id=?",(class_name,int(version_id)))
+        for slot,label,codes in c.fetchall():
+            sk=str(slot or '').upper(); lab=str(label or '').strip()
+            if not sk or not lab: continue
+            vals=[_norm(x).upper() for x in re.split(r'[;,\s]+', codes or '') if _norm(x)]
+            out.setdefault(sk,{})[lab]=sorted(set(vals))
+    except Exception:
+        out={}
+    conn.close(); return out
+
+def _period_slot_key(period, date_str=None):
+    try: p=int(period)
+    except Exception: p=0
+    day=_day_key(date_str).upper() if date_str else ''
+    return f"{day}-P{p}" if day else f"P{p}"
+
+def _elective_allowed_staff_codes(offering_map, elective_label, cell=None):
+    codes=set((offering_map or {}).get(elective_label or '', []) or [])
+    if codes: return {str(c).upper() for c in codes}
+    for opt in ((cell or {}).get('options') or []):
+        if (opt or '').strip()==(elective_label or '').strip():
+            m=re.search(r'\b([A-Z]{2,6})\b', (opt or '').upper())
+            if m: codes.add(m.group(1))
+    return {str(c).upper() for c in codes}
+
+def _can_mark_elective(class_name, date_str, period, cell=None):
+    code=(session.get('staff_code') or session.get('username') or '').upper()
+    role=session.get('role')
+    if role=='admin' or session.get('is_hod'): return True
+    if session.get('is_advisor') and session.get('advisor_class')==class_name: return True
+    cell = cell or timetable_cell(class_name,date_str,period) or {}
+    if not cell.get('options'): return False
+    vid=_timetable_version_id(class_name,date_str)
+    om=_elective_offering_map(class_name,vid)
+    slot=f"{_day_key(date_str).upper()}-P{int(period or 0)}"
+    opts=om.get(slot,{})
+    if opts:
+        for codes in opts.values():
+            if code and code in codes: return True
+        return False
+    for opt in (cell.get('options') or []):
+        if code and re.search(r'\b'+re.escape(code)+r'\b', (opt or '').upper()): return True
+    return False
+
 def _elective_lookup():
     conn=_db(); c=conn.cursor(); out={}
     try:
@@ -2148,6 +2235,7 @@ def api_admin_electives():
     students=[{'id':r[0],'name':r[1],'reg_no':r[2],'roll':r[3],'class':r[4],'student_role':r[5] or ''} for r in c.fetchall()]
     conn.close()
     slots=_elective_slots_for_version(cls,version)
+    offerings=_elective_offering_map(cls,vid) if vid is not None else {}
     details=_elective_map_details(cls,vid) if vid is not None else _elective_map_details(cls,None)
     option_map={s['slot_key']:set(s.get('options') or []) for s in slots}
     mapped=missing=unassigned=conflicts=0
@@ -2165,7 +2253,7 @@ def api_admin_electives():
         mapped+=filled; missing+=max(0,len(slots)-filled)
         if slots and not filled: unassigned+=1
     return jsonify({'ok':True,'class':cls,'semester_id':semester_id,'version':_timetable_version_json(version) if version else None,
-                    'versions':[_timetable_version_json(v) for v in versions],'slots':slots,'students':students,
+                    'versions':[_timetable_version_json(v) for v in versions],'slots':slots,'offerings':offerings,'students':students,
                     'stats':{'students':len(students),'slots':len(slots),'mapped':mapped,'missing':missing,
                              'unassigned_students':unassigned,'conflicts':conflicts}})
 
@@ -2179,28 +2267,52 @@ def api_admin_electives_save():
     if not version: return jsonify({'ok':False,'error':'Create/select a timetable version before mapping electives.'}), 400
     vid=int(version['id'])
     slots={s['slot_key']:s for s in _elective_slots_for_version(cls,version)}
-    items=data.get('mappings')
-    if items is None:
+    items=data.get('mappings') or []
+    if not items and data.get('student_id') is not None:
         items=[{'student_id':data.get('student_id'),'slot_key':data.get('slot_key'),'option_label':data.get('option_label')}]
-    conn=_db(); c=conn.cursor(); saved=cleared=0; errors=[]
+    offerings=data.get('offerings') or []
+    conn=_db(); c=conn.cursor(); saved=cleared=off_saved=0; errors=[]
+    def _slot_keys(slot_raw):
+        k=_norm(slot_raw).upper()
+        if k in slots: return [k]
+        if re.fullmatch(r"P?\d+", k):
+            p=k[1:] if k.startswith('P') else k
+            return [sk for sk in slots.keys() if sk.endswith(f"-P{p}") or sk==f"P{p}"]
+        return [k]
+    for off in offerings:
+        raw_slot=off.get('slot_key'); label=_norm(off.get('option_label'))
+        skeys=_slot_keys(raw_slot)
+        if not skeys or any(k not in slots for k in skeys): errors.append(f'Unknown elective slot {raw_slot}.'); continue
+        for slot in skeys:
+            if label not in slots[slot]['options']: errors.append(f'Invalid offering option for {slot}: {label}'); continue
+            codes=off.get('staff_codes') or off.get('staff') or []
+            if isinstance(codes,str): codes=re.split(r'[;,\s]+', codes)
+            vals=sorted(set([_norm(x).upper() for x in codes if _norm(x)]))
+            c.execute("""INSERT INTO elective_offerings(class_name,timetable_version_id,slot_key,option_label,staff_codes,updated_at,updated_by)
+                         VALUES (?,?,?,?,?,?,?) ON CONFLICT(class_name,timetable_version_id,slot_key,option_label)
+                         DO UPDATE SET staff_codes=excluded.staff_codes,updated_at=excluded.updated_at,updated_by=excluded.updated_by""",
+                      (cls,vid,slot,label,','.join(vals),_now_iso(),session.get('username')))
+            off_saved+=1
     for item in items:
         try: sid=int(item.get('student_id'))
         except Exception: errors.append('Invalid student id.'); continue
         c.execute('SELECT id,class FROM students WHERE id=?',(sid,)); st=c.fetchone()
         if not st or (st[1] or '').upper()!=cls.upper(): errors.append(f'Student {sid} is not in {cls}.'); continue
-        slot=_norm(item.get('slot_key')).upper(); label=_norm(item.get('option_label'))
-        if slot not in slots: errors.append(f'Unknown elective slot {slot}.'); continue
-        if not label:
-            c.execute('DELETE FROM student_electives WHERE student_id=? AND class_name=? AND timetable_version_id=? AND slot_key=?',(sid,cls,vid,slot)); cleared+=1; continue
-        if label not in slots[slot]['options']: errors.append(f'Invalid option for {slot}: {label}'); continue
-        c.execute("""INSERT INTO student_electives(student_id,class_name,timetable_version_id,slot_key,option_label,updated_at,updated_by)
-                     VALUES (?,?,?,?,?,?,?) ON CONFLICT(student_id,class_name,timetable_version_id,slot_key)
-                     DO UPDATE SET option_label=excluded.option_label,updated_at=excluded.updated_at,updated_by=excluded.updated_by""",
-                  (sid,cls,vid,slot,label,_now_iso(),session.get('username')))
-        saved+=1
+        raw_slot=item.get('slot_key'); label=_norm(item.get('option_label'))
+        skeys=_slot_keys(raw_slot)
+        if not skeys or any(k not in slots for k in skeys): errors.append(f'Unknown elective slot {raw_slot}.'); continue
+        for slot in skeys:
+            if not label:
+                c.execute('DELETE FROM student_electives WHERE student_id=? AND class_name=? AND timetable_version_id=? AND slot_key=?',(sid,cls,vid,slot)); cleared+=1; continue
+            if label not in slots[slot]['options']: errors.append(f'Invalid option for {slot}: {label}'); continue
+            c.execute("""INSERT INTO student_electives(student_id,class_name,timetable_version_id,slot_key,option_label,updated_at,updated_by)
+                         VALUES (?,?,?,?,?,?,?) ON CONFLICT(student_id,class_name,timetable_version_id,slot_key)
+                         DO UPDATE SET option_label=excluded.option_label,updated_at=excluded.updated_at,updated_by=excluded.updated_by""",
+                      (sid,cls,vid,slot,label,_now_iso(),session.get('username')))
+            saved+=1
     conn.commit(); conn.close()
-    if saved or cleared: audit_log('electives',cls,'save',str(vid),{'saved':saved,'cleared':cleared,'errors':errors,'version_no':version.get('version_no')},details='Admin saved version-scoped elective mappings')
-    return jsonify({'ok':not errors,'saved':saved,'cleared':cleared,'version':_timetable_version_json(version),'errors':errors}), (200 if not errors else 400)
+    if saved or cleared or off_saved: audit_log('electives',cls,'save',str(vid),{'saved':saved,'cleared':cleared,'off_saved':off_saved,'errors':errors,'version_no':version.get('version_no')},details='Admin saved version-scoped elective mappings/offerings')
+    return jsonify({'ok':not errors,'saved':saved,'cleared':cleared,'off_saved':off_saved,'version':_timetable_version_json(version),'errors':errors}), (200 if not errors else 400)
 
 @app.route('/api/admin/electives/carry-forward', methods=['POST'])
 @admin_required
@@ -3493,12 +3605,15 @@ def _is_assigned_staff(class_name, date_str, period):
 
 def can_mark_period(class_name, date_str, period):
     role=session.get('role')
+    cell=timetable_cell(class_name,date_str,period)
+    disp=(cell or {}).get('display','')
     if role=='admin': return True,'Admin (universal)'
     if session.get('is_hod'): return True,'HOD override'
     if session.get('is_advisor') and session.get('advisor_class')==class_name: return True,'Class advisor (own class, full day)'
+    if cell and cell.get('options'):
+        if _can_mark_elective(class_name,date_str,period,cell): return True,'Mapped elective staff/advisor'
+        return False,f"Not assigned: {disp} (mapped elective staff, class advisor, HOD/admin only)."
     if _is_assigned_staff(class_name,date_str,period): return True,'Assigned/handling staff'
-    cell=timetable_cell(class_name,date_str,period)
-    disp=(cell or {}).get('display','')
     return False,f"Not assigned: {disp} (only listed/handling staff for this period; advisor own-class full day; HOD/admin override)."
 
 def _student_profile_photo_path(sid):
@@ -3618,6 +3733,8 @@ def api_attendance_roster():
     rows=c.fetchall(); conn.close()
     is_subject=_is_assigned_staff(cls,date,period)
     emaps=_elective_lookup() if cell.get('options') else {}
+    slot_key=_period_slot_key(period,date)
+    offering_map=((_elective_offering_map(cls).get(slot_key) or {}) if cell.get('options') else {})
     students=[]
     for r in rows:
         sid=int(r[0]); ex=existing.get(sid) or {}
@@ -3630,6 +3747,11 @@ def api_attendance_roster():
         locked_od = od_approved and (session.get('role')!='admin') and not session.get('is_hod')
         locked_medical = medical_approved and (session.get('role')!='admin') and not session.get('is_hod')
         elective=(ex.get('elective_label') or _effective_subject(emaps,sid,cls,date,period,'')) if cell.get('options') else ''
+        can_mark_student=True; student_mark_reason=edit_reason
+        if cell.get('options') and session.get('role')=='staff' and not (session.get('is_hod') or session.get('role')=='admin'):
+            allowed=_elective_allowed_staff_codes(offering_map,elective,cell)
+            if allowed and session.get('username','').upper() not in allowed:
+                can_mark_student=False; student_mark_reason='Mapped elective staff only'
         students.append({'id':r[0],'name':r[1],'roll':r[2],'class':r[3],'section':r[4],'reg_no':r[5],'dob':r[6],
                          'phone':(r[7] if len(r)>7 else '') or '','email':(r[8] if len(r)>8 else '') or '',
                          'guardian_name':(r[9] if len(r)>9 else '') or '','guardian_phone':(r[10] if len(r)>10 else '') or '',
@@ -3637,8 +3759,9 @@ def api_attendance_roster():
                          'photo_url':f'/student_photo_safe/{r[0]}' if _student_photo_path(r[0]) else None,
                          'selected_elective':elective,'effective_subject':elective or disp,
                           'default_status':UNMARKED_STATUS,'status':st,'unmarked':st==UNMARKED_STATUS,
-                          'locked_absent':locked_absent,'locked_od':locked_od,'od_approved':od_approved,
+                          'locked_absent':locked_absent or (not can_mark_student),'locked_od':locked_od,'od_approved':od_approved,
                           'locked_medical':locked_medical,'medical_approved':medical_approved,
+                          'can_mark':can_mark_student,'mark_reason':student_mark_reason,
                           'edit_allowed':edit_allowed,'edit_reason':edit_reason,'session_id':sess_id})
     start_hour, window_days, end_hour = _attendance_window_settings()
     end_date = datetime.date.fromisoformat(date) + datetime.timedelta(days=window_days - 1)
@@ -3714,6 +3837,10 @@ def api_attendance_submit():
             except Exception: conf = None
             flagged = 1 if face_mark and m.get('flagged') else 0
             elabel=_effective_subject(emaps,stid,cls,date,period,'',version_id) if cell.get('options') else ''
+            if cell.get('options') and session.get('role')=='staff' and not (session.get('is_hod') or session.get('role')=='admin'):
+                allowed=_elective_allowed_staff_codes(((_elective_offering_map(cls).get(_period_slot_key(period,date)) or {})), elabel, cell)
+                if allowed and session.get('username','').upper() not in allowed:
+                    blocked += 1; details.append({'student_id':stid,'blocked':'Mapped elective staff only'}); continue
             c.execute("INSERT INTO attendance_entries (session_id,student_id,reg_no,student_name,status,confidence,flagged,source,marked_by,updated_at,elective_label) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,student_id) DO UPDATE SET reg_no=excluded.reg_no,student_name=excluded.student_name,status=excluded.status,confidence=excluded.confidence,flagged=excluded.flagged,source=excluded.source,marked_by=excluded.marked_by,updated_at=excluded.updated_at,elective_label=COALESCE(NULLIF(excluded.elective_label,''),attendance_entries.elective_label)",
                       (sess,stid,reg,sname,status,conf,flagged,src,marked_by,now,elabel))
             if _is_attendance_absence(status) and not _is_attendance_absence(prev_st):

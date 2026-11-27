@@ -100,7 +100,7 @@
   const $=id=>document.getElementById(id);
   const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   const INIT_SEMS={{ semesters|tojson }};
-  let slots=[], students=[], dirty=false, currentClass='', currentVersion=null, versions=[], stats={};
+  let slots=[], students=[], offerings={}, dirty=false, currentClass='', currentVersion=null, versions=[], stats={};
 
   function msg(t,type='info'){
     const e=$('msg'); if(!t){ e.classList.add('d-none'); e.innerHTML=''; return; }
@@ -185,7 +185,13 @@
   function renderSlots(){
     if(!slots.length){ $('emptySlots').classList.remove('d-none'); $('slotCards').innerHTML='<div class="col-12 text-muted small">No elective slots.</div>'; return; }
     $('emptySlots').classList.add('d-none');
-    $('slotCards').innerHTML=slots.map(s=>`<div class="col-md-6 col-xl-4"><div class="slot-card h-100"><div class="d-flex justify-content-between gap-2"><span class="slot-key">${esc(s.slot_key)}</span><span class="badge bg-light text-dark border">P${Number(s.period)||''}</span></div><div class="fw-semibold small mt-1">${esc(s.display)}</div><div class="text-muted small">${esc(s.subject)}</div><ul class="mb-0 mt-1 ps-3">${(s.options||[]).map(o=>`<li class="option">${esc(o)}</li>`).join('')}</ul></div></div>`).join('');
+    $('slotCards').innerHTML=slots.map(s=>`<div class="col-md-6 col-xl-6"><div class="slot-card h-100">
+      <div class="d-flex justify-content-between gap-2"><span class="slot-key">${esc(s.slot_key)}</span><span class="badge bg-light text-dark border">P${Number(s.period)||''}</span></div>
+      <div class="fw-semibold small mt-1">${esc(s.display)}</div><div class="text-muted small">${esc(s.subject)}</div>
+      <div class="mt-2 small text-muted">Mapped staff codes per option (comma/space separated). Leave blank to fallback to timetable option text.</div>
+      ${(s.options||[]).map(o=>{ const vals=((offerings[s.slot_key]||{})[o]||[]).join(', '); return `<div class="mt-1"><label class="form-label small mb-0">${esc(o)}</label><input class="form-control form-control-sm off-staff" data-slot="${esc(s.slot_key)}" data-opt="${esc(o)}" value="${esc(vals)}" placeholder="e.g. MEK, SKA"></div>`; }).join('')}
+    </div></div>`).join('');
+    document.querySelectorAll('.off-staff').forEach(el=>el.addEventListener('input',()=>setDirty(true)));
   }
 
   function updateExportLink(){

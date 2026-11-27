@@ -390,6 +390,7 @@
         <td class="text-nowrap">
           <button class="btn btn-outline-primary btn-sm" data-load-version="${attr(v.id)}" type="button">Load</button>
           <button class="btn btn-outline-secondary btn-sm" data-restore-version="${attr(v.id)}" type="button">Restore</button>
+          <button class="btn btn-outline- btn-sm" data-hide-version="" data-hidden="" type="button"></button>
         </td>
       </tr>`).join('');
   }
@@ -536,7 +537,8 @@
     try{
       await erp.fetchJSON('/api/admin/timetable/'+encodeURIComponent(cls)+'/create',{method:'POST',body:{}});
       const d=await erp.fetchJSON('/api/admin/timetables');
-      classList=d.classes||classList; populateClasses(); $('classSelect').value=cls;
+      classList=d.classes||classList; populateClasses();
+    document.getElementById('historyTable').addEventListener('click', async (e)=>{ const hb=e.target.closest('[data-hide-version]'); if(!hb) return; const id=Number(hb.dataset.hideVersion); const hidden=hb.dataset.hidden==='1'; try{ await erp.fetchJSON('/api/admin/timetable/versions/'+id+'/hide',{method:'POST',body:{hidden:!hidden}}); await loadVersions(state.class,state.semesterId); renderHistory(); erp.toast((hidden?'Unhid':'Hid')+' version','success'); }catch(err){ erp.toast(err.message||'Update failed','danger'); } }); $('classSelect').value=cls;
       state.dirty=false; await loadClass(cls); setDirty(true);
       msg('Template created for '+cls+'. Fill it in and save a version.','success');
     }catch(e){ msg(e.message||'Could not create class.','danger'); }
