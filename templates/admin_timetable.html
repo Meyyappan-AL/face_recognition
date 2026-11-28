@@ -214,7 +214,7 @@
   const INIT_CLASSES={{ classes|tojson }};
   const BATCHES={{ batches|tojson }};
   const TODAY={{ today|tojson }};
-  const state={class:'',batch:null,semNo:null,semesterId:null,data:null,versionId:null,versions:[],
+  const state={class:'',batch:null,semNo:null,semesterId:null,data:null,versionId:null,versions:[],loadSeq:0,
                referencePath:'',referenceName:'',referenceUrl:'',notes:'',dirty:false,today:TODAY};
   let classList=INIT_CLASSES.slice();
 
@@ -429,8 +429,11 @@
   }
 
   async function loadVersion(versionId){
+    const seq=state.loadSeq; const cls=state.class;
     const d=await erp.fetchJSON('/api/admin/timetable/versions/'+encodeURIComponent(versionId));
+    if(seq!==state.loadSeq || cls!==state.class) return;
     const v=d.version||{};
+    if(v.class && String(v.class).toUpperCase()!==String(cls).toUpperCase()) return;
     state.versionId=v.id;
     state.data=v.data||{};
     state.referencePath=v.reference_path||'';
@@ -439,7 +442,7 @@
     state.notes=v.notes||'';
     state.dirty=false;
     renderEditor(); renderHistory(); clearLists();
-    msg('Loaded version v'+v.version_no+' ('+v.status+').','success');
+    msg('Loaded '+(v.class||cls)+' v'+v.version_no+' ('+v.status+').','success');
   }
 
   async function loadLegacy(cls){
@@ -458,18 +461,20 @@
     if(!cls){ state.data=null; renderEditor(); return; }
     if(state.dirty && !confirm('Discard unsaved changes and load '+cls+'?')){ $('classSelect').value=state.class; return; }
     cls=String(cls||'').toUpperCase().trim();
+    const seq=++state.loadSeq;
     state.class=cls; state.versionId=null; state.versions=[]; state.batch=currentBatch(); state.semNo=currentSemNo(); state.semesterId=null;
     state.data=emptyTimetable(cls); state.referencePath=''; state.referenceName=''; state.referenceUrl=''; state.notes=''; state.dirty=false;
     $('classSelect').value=cls; $('importResult').textContent=''; clearLists(); renderHistory(); renderEditor();
     msg('Loading '+cls+' (batch '+state.batch+', sem '+state.semNo+')...');
     try{
       await loadVersions(cls,state.batch,state.semNo);
+      if(seq!==state.loadSeq || state.class!==cls) return;
       const pick=state.versions.find(v=>v.status==='current')||state.versions[0];
       if(pick){ await loadVersion(pick.id); return; }
       if(state.versions.length){ await loadVersion(state.versions[0].id); return; }
       try{ await loadLegacy(cls); }
-      catch(le){ state.data=emptyTimetable(cls); state.versionId=null; state.dirty=false; renderHistory(); renderEditor(); msg('No timetable version for '+cls+' in selected batch/sem. Create or import one.','warning'); }
-    }catch(e){ state.data=emptyTimetable(cls); state.versionId=null; state.versions=[]; state.dirty=false; renderHistory(); renderEditor(); msg(e.message||'Could not load timetable.','danger'); erp.toast(e.message||'Load failed','danger'); }
+      catch(le){ if(seq!==state.loadSeq) return; state.data=emptyTimetable(cls); state.versionId=null; state.dirty=false; renderHistory(); renderEditor(); msg('No timetable version for '+cls+' in selected batch/sem. Create or import one.','warning'); }
+    }catch(e){ if(seq!==state.loadSeq) return; state.data=emptyTimetable(cls); state.versionId=null; state.versions=[]; state.dirty=false; renderHistory(); renderEditor(); msg(e.message||'Could not load timetable.','danger'); erp.toast(e.message||'Load failed','danger'); }
   }
 
   async function validateData(){
