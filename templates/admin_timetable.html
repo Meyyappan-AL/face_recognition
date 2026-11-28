@@ -192,7 +192,7 @@
         <div class="erp-muted small">Restoring creates a new version effective from the selected date.</div>
       </div>
       <div class="table-responsive">
-        <table class="table table-sm tt-history align-middle mb-0">
+        <table id="historyTable" class="table table-sm tt-history align-middle mb-0">
           <thead><tr><th>Ver</th><th>Effective</th><th>Status</th><th>Reference</th><th>Notes</th><th>Saved by</th><th></th></tr></thead>
           <tbody id="versionRows"><tr><td colspan="7" class="text-muted">No versions loaded.</td></tr></tbody>
         </table>
@@ -390,7 +390,7 @@
         <td class="text-nowrap">
           <button class="btn btn-outline-primary btn-sm" data-load-version="${attr(v.id)}" type="button">Load</button>
           <button class="btn btn-outline-secondary btn-sm" data-restore-version="${attr(v.id)}" type="button">Restore</button>
-          <button class="btn btn-outline- btn-sm" data-hide-version="" data-hidden="" type="button"></button>
+          <button class="btn btn-outline-${v.hidden?'success':'warning'} btn-sm" data-hide-version="${attr(v.id)}" data-hidden="${v.hidden?'1':'0'}" type="button">${v.hidden?'Unhide':'Hide'}</button>
         </td>
       </tr>`).join('');
   }
@@ -538,7 +538,7 @@
       await erp.fetchJSON('/api/admin/timetable/'+encodeURIComponent(cls)+'/create',{method:'POST',body:{}});
       const d=await erp.fetchJSON('/api/admin/timetables');
       classList=d.classes||classList; populateClasses();
-    document.getElementById('historyTable').addEventListener('click', async (e)=>{ const hb=e.target.closest('[data-hide-version]'); if(!hb) return; const id=Number(hb.dataset.hideVersion); const hidden=hb.dataset.hidden==='1'; try{ await erp.fetchJSON('/api/admin/timetable/versions/'+id+'/hide',{method:'POST',body:{hidden:!hidden}}); await loadVersions(state.class,state.semesterId); renderHistory(); erp.toast((hidden?'Unhid':'Hid')+' version','success'); }catch(err){ erp.toast(err.message||'Update failed','danger'); } }); $('classSelect').value=cls;
+      $('classSelect').value=cls;
       state.dirty=false; await loadClass(cls); setDirty(true);
       msg('Template created for '+cls+'. Fill it in and save a version.','success');
     }catch(e){ msg(e.message||'Could not create class.','danger'); }
@@ -596,14 +596,23 @@
     }catch(e){ msg('Cannot apply JSON: '+e.message,'danger'); }
   });
 
-  $('versionRows').addEventListener('click',e=>{
+  $('versionRows').addEventListener('click',async e=>{
     const load=e.target.closest('[data-load-version]');
     if(load){
       if(state.dirty && !confirm('Discard unsaved changes and load this version?')) return;
       loadVersion(load.dataset.loadVersion); return;
     }
     const restore=e.target.closest('[data-restore-version]');
-    if(restore) restoreVersion(restore.dataset.restoreVersion);
+    if(restore){ restoreVersion(restore.dataset.restoreVersion); return; }
+    const hb=e.target.closest('[data-hide-version]');
+    if(hb){
+      const id=Number(hb.dataset.hideVersion); const hidden=hb.dataset.hidden==='1';
+      try{
+        await erp.fetchJSON('/api/admin/timetable/versions/'+id+'/hide',{method:'POST',body:{hidden:!hidden}});
+        await loadVersions(state.class,state.semesterId); renderHistory();
+        erp.toast((hidden?'Unhid':'Hid')+' version','success');
+      }catch(err){ erp.toast(err.message||'Update failed','danger'); }
+    }
   });
 
   $('loadBtn').addEventListener('click',()=>loadClass($('classSelect').value));
@@ -644,11 +653,21 @@
 
   (async function init(){
     populateClasses();
-    const classes=await (async()=>{ try{ const d=await erp.fetchJSON('/api/admin/timetables'); classList=d.classes||classList; return classList; }catch(_){ return classList; } })();
-    $('classChips').innerHTML=classes.length?classes.map(c=>`<span class="tt-chip">${esc(c)}</span>`).join(''):'<span class="text-muted">No classes yet.</span>';
+    let classes=classList.slice();
+    try{
+      const d=await erp.fetchJSON('/api/admin/timetables');
+      if(Array.isArray(d.classes) && d.classes.length) classes=d.classes;
+    }catch(e){ console.warn('timetables list failed',e); }
+    classList=Array.from(new Set((classes||[]).filter(Boolean)));
+    $('classChips').innerHTML=classList.length?classList.map(c=>`<span class="tt-chip">${esc(c)}</span>`).join(''):'<span class="text-muted">No classes yet.</span>';
     populateClasses();
-    if(classes.length){ state.class=classes[0]; $('classSelect').value=classes[0]; await loadClass(classes[0]); }
-    else { msg('No timetables found. Create a class to start.','warning'); }
+    if(classList.length){
+      state.class=classList[0]; $('classSelect').value=classList[0]; setDirty(false);
+      await loadClass(classList[0]);
+    } else {
+      msg('No classes found. Use New Class to create one.','warning');
+      $('dirtyState').innerHTML='<span class="badge bg-warning text-dark">No classes</span>';
+    }
   })();
 })();
 </script>
