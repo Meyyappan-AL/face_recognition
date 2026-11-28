@@ -21,13 +21,14 @@
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
         <div>
           <h5 class="erp-section-title mb-1">Student Elective Options</h5>
-          <div class="erp-muted">Map each student to one option per elective timetable slot for the selected timetable version. Both elective staff can mark the full shared roster; historical labels are stored on attendance entries.</div>
+          <div class="erp-muted">Map each student to one option per elective timetable slot for the selected timetable version. Electives apply only for Sem 5-8; Sem 1-4 are hidden/blocked. Staff/students can view but cannot edit current/previous semester elective data.</div>
         </div>
         <div class="d-flex gap-2 flex-wrap align-items-center">
           <select id="cls" class="form-select form-select-sm" style="min-width:140px" aria-label="Class">
             {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
           </select>
-          <select id="sem" class="form-select form-select-sm" style="min-width:150px" aria-label="Semester"></select>
+          <select id="batch" class="form-select form-select-sm" style="min-width:140px" aria-label="Batch">{% for b in batches %}<option value="{{b.batch_start_year}}">{{b.label}}</option>{% endfor %}</select>
+          <select id="sem" class="form-select form-select-sm" style="min-width:110px" aria-label="Semester">{% for n in range(1,9) %}<option value="{{n}}">Sem {{n}}</option>{% endfor %}</select>
           <select id="version" class="form-select form-select-sm" style="min-width:210px" aria-label="Timetable version"></select>
           <button id="loadBtn" class="btn btn-primary btn-sm" type="button">Load</button>
           <button id="saveBtn" class="btn btn-success btn-sm" type="button" disabled>Save Mappings</button>
@@ -221,11 +222,15 @@
     msg('Loading '+cls+'...'); $('loadBtn').disabled=true;
     try{
       const selId=$('version').value;
-      let url='/api/admin/electives?class='+encodeURIComponent(cls)+'&semester_id='+encodeURIComponent(currentSem()||'');
+      let url='/api/admin/electives?class='+encodeURIComponent(cls)+'&batch_start_year='+encodeURIComponent($('batch').value||'')+'&sem_no='+encodeURIComponent($('sem').value||'');
       if(selId) url+='&version_id='+encodeURIComponent(selId);
       const d=await erp.fetchJSON(url);
-      currentClass=cls; currentVersion=d.version||null; versions=d.versions||[]; slots=d.slots||[]; students=d.students||[];
+      currentClass=cls; currentVersion=d.version||null; versions=d.versions||[]; slots=d.slots||[]; students=d.students||[]; canEdit=d.can_edit!==false;
       fillVersions(); renderSlots(); renderMatrix(); updateExportLink(); renderStats(d); setDirty(false);
+      if(d.electives_enabled===false){ msg(d.message||'Electives apply only for Sem 5-8.','warning'); $('saveBtn').disabled=true; $('carryBtn').disabled=true; }
+      else if(!canEdit){ msg(d.edit_reason||'Read-only for current/previous semester.','warning'); }
+      $('saveBtn').disabled = !canEdit || !currentVersion || !slots.length || d.electives_enabled===false;
+      $('carryBtn').disabled = !canEdit || !currentVersion || d.electives_enabled===false;
       await loadAudit();
       msg('Loaded '+students.length+' students and '+slots.length+' elective slots for '+esc(cls)+(currentVersion?(' · v'+currentVersion.version_no):' · no version')+'.','success');
     }catch(e){ msg('Could not load electives: '+esc(e.message||e),'danger'); }

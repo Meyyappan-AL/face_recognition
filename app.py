@@ -2491,22 +2491,43 @@ def _resolve_elective_version(class_name, version_id=None, semester_id=None):
     rows=_timetable_version_rows(class_name,None)
     return rows[0] if rows else None
 
+def _is_admin_role():
+    return (session.get('role') or '').lower() in ('admin','hod') or bool(session.get('is_hod'))
+
+def _sem_edit_allowed(sem_row):
+    if _is_admin_role(): return True, None
+    if not sem_row: return False, 'Semester context required.'
+    by=sem_row.get('batch_start_year'); sn=sem_row.get('sem_no')
+    if by is None or sn is None: return False, 'Batch semester context required.'
+    cur=current_sem_for_batch(by) or sn
+    if int(sn) <= int(cur):
+        return False, 'Staff/students can view but cannot edit timetable/elective data for current or previous semesters.'
+    return True, None
+
 @app.route('/admin/electives')
 @admin_required
 def admin_electives_page():
-    return render_template('admin_electives.html', classes=get_classes(), semesters=_semester_rows(), today=_today_ist_str())
+    batches=[{'batch_start_year':by,'label':batch_label(by)} for by in BATCH_START_YEARS]
+    return render_template('admin_electives.html', classes=get_classes(), batches=batches, today=_today_ist_str())
 
 @app.route('/api/admin/electives')
 @admin_required
 def api_admin_electives():
     cls=(request.args.get('class') or '').strip()
     if not cls or cls not in get_classes(): return jsonify({'ok':False,'error':'Valid class required.'}), 400
-    try: semester_id=int(request.args.get('semester_id')) if request.args.get('semester_id') else None
-    except Exception: semester_id=None
+    sem, by=_resolve_batch_sem_from_request()
+    semester_id=int(sem['id']) if sem and sem.get('id') else None
+    sem_no=int(sem.get('sem_no') or 0) if sem else None
+    if sem_no and sem_no < 5:
+        return jsonify({'ok':True,'class':cls,'batch_start_year':by,'semester_id':semester_id,'sem_no':sem_no,'electives_enabled':False,
+                        'message':'Electives apply only for Sem 5-8.','version':None,'versions':[],'slots':[],'offerings':{},'students':[],
+                        'stats':{'students':0,'slots':0,'mapped':0,'missing':0,'unassigned_students':0,'conflicts':0}})
     version=_resolve_elective_version(cls,request.args.get('version_id'),semester_id)
     vid=int(version['id']) if version else None
     if semester_id is None and version and version.get('semester_id') is not None:
         semester_id=int(version['semester_id'])
+        sem=_semester_by_id(semester_id) or sem
+        sem_no=int((sem or {}).get('sem_no') or sem_no or 0) or sem_no
     versions=_timetable_version_rows(cls,semester_id) if semester_id is not None else _timetable_version_rows(cls)
     if version and all(int(v.get('id') or 0)!=vid for v in versions):
         versions=[version]+versions
@@ -2532,7 +2553,9 @@ def api_admin_electives():
                 if label not in option_map.get(sl['slot_key'],set()): conflicts+=1
         mapped+=filled; missing+=max(0,len(slots)-filled)
         if slots and not filled: unassigned+=1
-    return jsonify({'ok':True,'class':cls,'semester_id':semester_id,'version':_timetable_version_json(version) if version else None,
+    can_edit, edit_reason=_sem_edit_allowed(sem)
+    return jsonify({'ok':True,'class':cls,'batch_start_year':by,'semester_id':semester_id,'sem_no':sem_no,'electives_enabled':True,'can_edit':can_edit,'edit_reason':edit_reason,
+                    'version':_timetable_version_json(version) if version else None,
                     'versions':[_timetable_version_json(v) for v in versions],'slots':slots,'offerings':offerings,'students':students,
                     'stats':{'students':len(students),'slots':len(slots),'mapped':mapped,'missing':missing,
                              'unassigned_students':unassigned,'conflicts':conflicts}})
@@ -2543,7 +2566,13 @@ def api_admin_electives_save():
     data=request.get_json(silent=True) or {}
     cls=_norm(data.get('class_name') or data.get('class'))
     if not cls or cls not in get_classes(): return jsonify({'ok':False,'error':'Valid class required.'}), 400
-    version=_resolve_elective_version(cls,data.get('version_id'),data.get('semester_id'))
+    sem, _by=_resolve_batch_sem_from_request(data=data)
+    sem_no=int((sem or {}).get('sem_no') or 0)
+    if sem and sem_no and sem_no < 5:
+        return jsonify({'ok':False,'error':'Electives are available only for Sem 5-8.'}), 400
+    allowed, reason=_sem_edit_allowed(sem)
+    if not allowed: return jsonify({'ok':False,'error':reason}), 403
+    version=_resolve_elective_version(cls,data.get('version_id'),int(sem['id']) if sem and sem.get('id') else data.get('semester_id'))
     if not version: return jsonify({'ok':False,'error':'Create/select a timetable version before mapping electives.'}), 400
     vid=int(version['id'])
     slots={s['slot_key']:s for s in _elective_slots_for_version(cls,version)}
@@ -2600,7 +2629,13 @@ def api_admin_electives_carry_forward():
     data=request.get_json(silent=True) or {}
     cls=_norm(data.get('class_name') or data.get('class'))
     if not cls or cls not in get_classes(): return jsonify({'ok':False,'error':'Valid class required.'}), 400
-    target=_resolve_elective_version(cls,data.get('version_id'),data.get('semester_id'))
+    sem, _by=_resolve_batch_sem_from_request(data=data)
+    sem_no=int((sem or {}).get('sem_no') or 0)
+    if sem and sem_no and sem_no < 5:
+        return jsonify({'ok':False,'error':'Electives are available only for Sem 5-8.'}), 400
+    allowed, reason=_sem_edit_allowed(sem)
+    if not allowed: return jsonify({'ok':False,'error':reason}), 403
+    target=_resolve_elective_version(cls,data.get('version_id'),int(sem['id']) if sem and sem.get('id') else data.get('semester_id'))
     if not target: return jsonify({'ok':False,'error':'Target timetable version required.'}), 400
     tid=int(target['id'])
     target_slots={s['slot_key']:s for s in _elective_slots_for_version(cls,target)}
