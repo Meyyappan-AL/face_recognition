@@ -1984,38 +1984,46 @@ def api_admin_timetable_version_detail(version_id):
 @app.route('/api/admin/timetable/import/preview', methods=['POST'])
 @admin_required
 def api_admin_timetable_import_preview():
-    data=request.get_json(silent=True) or {}
-    text=data.get('text') or ''
-    cls=canonical_class_name(data.get('class') or '')
-    sem, _by=_resolve_batch_sem_from_request(data=data)
-    sem_id=int(sem['id']) if sem and sem.get('id') else None
-    res=_parse_timetable_import(text, cls, sem_id)
-    return jsonify(res), (200 if res.get('ok') else 400)
+    try:
+        data=request.get_json(silent=True) or {}
+        text=data.get('text') or ''
+        cls=canonical_class_name(data.get('class') or '')
+        sem, _by=_resolve_batch_sem_from_request(data=data)
+        sem_id=int(sem['id']) if sem and sem.get('id') else None
+        res=_parse_timetable_import(text, cls, sem_id)
+        return jsonify(res), (200 if res.get('ok') else 400)
+    except Exception as e:
+        app.logger.exception('Timetable import preview failed')
+        return jsonify({'ok':False,'errors':[f'Import preview failed: {str(e)}'],'warnings':[]}), 500
 
 @app.route('/api/admin/timetable/import/apply', methods=['POST'])
 @admin_required
 def api_admin_timetable_import_apply():
-    data=request.get_json(silent=True) or {}
-    text=data.get('text') or ''
-    cls=canonical_class_name(data.get('class') or '')
-    sem, _by=_resolve_batch_sem_from_request(data=data)
-    sem_id=int(sem['id']) if sem else None
-    allowed, reason=_sem_edit_allowed(sem)
-    if not allowed: return jsonify({'ok':False,'error':reason}), 403
-    effective_from=(data.get('effective_from') or _today_ist_str()).strip()
-    preview=_parse_timetable_import(text, cls, sem_id)
-    if not preview.get('ok'):
-        return jsonify(preview), 400
-    payload=preview.get('data') or {}
-    cls=canonical_class_name(payload.get('class') or cls)
-    res=_save_timetable_version(cls, sem_id, effective_from, payload, notes=(data.get('notes') or 'Imported timetable'), force_new=True)
-    if not res.get('ok'):
-        return jsonify(res), 400
-    staff_sync=sync_staff_from_timetables(reset_passwords=False)
-    audit_log('timetable', cls, 'import', None, {'version_id':res.get('version_id'),'effective_from':effective_from}, details='Admin imported timetable')
-    res['staff_sync']=staff_sync
-    res['import']= {'warnings':preview.get('warnings',[]),'staff_count':preview.get('staff_count',0)}
-    return jsonify(res)
+    try:
+        data=request.get_json(silent=True) or {}
+        text=data.get('text') or ''
+        cls=canonical_class_name(data.get('class') or '')
+        sem, _by=_resolve_batch_sem_from_request(data=data)
+        sem_id=int(sem['id']) if sem else None
+        allowed, reason=_sem_edit_allowed(sem)
+        if not allowed: return jsonify({'ok':False,'error':reason}), 403
+        effective_from=(data.get('effective_from') or _today_ist_str()).strip()
+        preview=_parse_timetable_import(text, cls, sem_id)
+        if not preview.get('ok'):
+            return jsonify(preview), 400
+        payload=preview.get('data') or {}
+        cls=canonical_class_name(payload.get('class') or cls)
+        res=_save_timetable_version(cls, sem_id, effective_from, payload, notes=(data.get('notes') or 'Imported timetable'), force_new=True)
+        if not res.get('ok'):
+            return jsonify(res), 400
+        staff_sync=sync_staff_from_timetables(reset_passwords=False)
+        audit_log('timetable', cls, 'import', None, {'version_id':res.get('version_id'),'effective_from':effective_from}, details='Admin imported timetable')
+        res['staff_sync']=staff_sync
+        res['import']= {'warnings':preview.get('warnings',[]),'staff_count':preview.get('staff_count',0)}
+        return jsonify(res)
+    except Exception as e:
+        app.logger.exception('Timetable import apply failed')
+        return jsonify({'ok':False,'errors':[f'Import failed: {str(e)}'],'warnings':[]}), 500
 
 @app.route('/api/admin/timetable/versions', methods=['POST'])
 @admin_required
@@ -2137,138 +2145,287 @@ def api_admin_timetable_reference_upload():
 
 
 def _parse_timetable_import(text, class_hint='', semester_id=None):
-    """Parse a simple pasted timetable text/CSV into timetable JSON.
-    Expected header lines: CLASS, HALL NO, CLASS ADVISOR, DAY/PERIOD ... STAFF INCHARGE
-    Rows: DAY, P1..P7, blank staff column
-    Cell: SUBJECT - STAFF (HALL) or SUBJECT (STAFF)
+    """Parse pasted timetable text/CSV into timetable JSON.
+    Supports college-format tables (Day/Hour header, SUBJECT (CODE) cells, metadata lines,
+    CODE/SUBJECT/STAFF INCHARGE tables) and simple DAY/PERIOD + staff columns.
     """
     raw=(text or '').replace('\ufeff','')
     lines=[ln.rstrip('\n\r') for ln in raw.splitlines()]
     errors=[]; warnings=[]
     if not any(x.strip() for x in lines):
         return {'ok':False,'errors':['Import text is empty.'],'warnings':[]}
-    # detect delimiter
-    sample='\n'.join(lines[:10])
-    delim='\t' if '\t' in sample else (',' if sample.count(',')>sample.count('  ') else None)
+    sample='\n'.join(lines[:15])
+    delim='\t' if '\t' in sample else (',' if sample.count(',') >= max(6, sample.count('  ')) else None)
     rows=[]
     if delim==',':
         import csv, io as _io
         rows=list(csv.reader(_io.StringIO(raw)))
     else:
         for ln in lines:
-            if '\t' in ln: rows.append([x.strip() for x in ln.split('\t')])
-            else: rows.append([x.strip() for x in re.split(r'\s{2,}', ln.strip())])
-    # metadata
+            if '\t' in ln:
+                rows.append([x.strip() for x in ln.split('\t')])
+            elif '  ' in ln.strip():
+                rows.append([x.strip() for x in re.split(r'\s{2,}', ln.strip())])
+            else:
+                rows.append([ln.strip()])
+
+    def _cells(r):
+        return [_norm(x) for x in (r or []) if _norm(x)]
+    def _joined(r):
+        return ' '.join(_cells(r)).upper()
+    def _looks_day_header(j):
+        return 'DAY' in j and ('PERIOD' in j or 'HOUR' in j or re.search(r'\b1\s*[\(\-]', j))
+    def _looks_staff_table_header(r):
+        cells=_cells(r); j=' '.join(c.upper() for c in cells)
+        return ('STAFF INCHARGE' in j and ('SUBJECT' in j or 'CODE' in j or 'PERIOD' in j)) or (len(cells)>=3 and cells[0].upper()=='CODE' and 'SUBJECT' in j)
+    def _looks_meta_staff_incharge(r):
+        cells=_cells(r)
+        if not cells: return False
+        c0=cells[0].upper().replace(':','').strip()
+        return c0 in ('STAFF INCHARGE','STAFF-INCHARGE','STAFF INCHARGES') and len(cells)<=3
+
     cls=canonical_class_name(class_hint)
     hall=''; advisor_name=''; advisor_code=''
-    staff_incharge=[]
-    header_idx=None
+    staff_incharge=[]; staff_dir={}; name_to_code={}
+    schedule={d:[] for d in DAY_KEYS}
+    slots=[]
+
+    # --- metadata pass ---
     for i,r in enumerate(rows):
-        cells=[_norm(x) for x in r if _norm(x)]
-        joined=' '.join(cells).upper()
-        if not cls:
-            for c0 in cells:
-                m=re.search(r'\b(\d{2}[A-Z]{2,4}\d[A-Z])\b', c0.upper())
-                if m and is_valid_class_name(canonical_class_name(m.group(1))):
-                    cls=canonical_class_name(m.group(1)); break
-        if joined.startswith('CLASS') and len(cells)>=2 and 'ADVISOR' not in joined:
-            maybe=cells[1]
-            if is_valid_class_name(canonical_class_name(maybe)): cls=canonical_class_name(maybe)
-        if 'HALL' in joined and len(cells)>=2:
-            hall=cells[-1]
-        if 'CLASS ADVISOR' in joined and len(cells)>=2:
-            advisor_name=cells[-1]
-        if 'STAFF INCHARGE' in joined:
-            # staff names after label, may span row
+        cells=_cells(r)
+        if not cells: continue
+        joined=_joined(r)
+        for c0 in cells:
+            m=re.search(r'\b(\d{2}[A-Z]{2,4}\d[A-Z])\b', str(c0).upper())
+            if m and is_valid_class_name(canonical_class_name(m.group(1))):
+                if not cls: cls=canonical_class_name(m.group(1))
+        # parse KEY: VALUE style metadata from cells
+        for ci,cell in enumerate(cells):
+            cu=cell.upper()
+            if cu.startswith('CLASS:') and not re.search(r'\bCLASS ADVISOR\b', cu):
+                val=cell.split(':',1)[1].strip() if ':' in cell else ''
+                if not val and ci+1 < len(cells): val=cells[ci+1]
+                cand=canonical_class_name(val)
+                if is_valid_class_name(cand): cls=cand
+            if cu.startswith('HALL NO') or cu.startswith('HALL:'):
+                val=cell.split(':',1)[1].strip() if ':' in cell else ''
+                if not val and ci+1 < len(cells): val=cells[ci+1]
+                if val and 'TOTAL' not in val.upper() and 'CLASS ADVISOR' not in val.upper():
+                    hall=val
+            if 'CLASS ADVISOR' in cu:
+                val=cell.split(':',1)[1].strip() if ':' in cell else ''
+                if not val and ci+1 < len(cells): val=cells[ci+1]
+                if val and not advisor_name: advisor_name=val
+        if _looks_meta_staff_incharge(r):
             for c0 in cells[1:]:
-                if c0.upper()!='STAFF INCHARGE': staff_incharge.append(c0)
-            header_idx=i
-        if 'DAY' in joined and 'PERIOD' in joined:
-            header_idx=i
-    # parse staff incharge block below header
-    if header_idx is not None:
-        for r in rows[header_idx+1:]:
-            c0=_norm(r[0]) if r else ''
-            rest=[_norm(x) for x in r[1:] if _norm(x)] if len(r)>1 else []
-            if c0.upper() in DAY_KEYS:
-                break
-            for x in ([c0]+rest):
-                if x and x.upper() not in ('STAFF INCHARGE','DAY/PERIOD'):
-                    staff_incharge.append(x)
+                if c0 and c0.upper()!='STAFF INCHARGE': staff_incharge.append(c0)
+            for rr in rows[i+1:]:
+                c0=_norm(rr[0]) if rr else ''
+                rest=[_norm(x) for x in rr[1:] if _norm(x)] if len(rr)>1 else []
+                if c0.upper() in DAY_KEYS or _looks_day_header(_joined(rr)) or _looks_staff_table_header(rr): break
+                for x in ([c0]+rest):
+                    if x and x.upper() not in ('STAFF INCHARGE','DAY/PERIOD','DAY/HOUR'):
+                        staff_incharge.append(x)
+
+    # --- parse CODE/SUBJECT/STAFF INCHARGE tables into staff_dir ---
+    def _add_staff(name, preferred_code=None):
+        nm=_norm(name)
+        if not nm: return ''
+        nm=re.sub(r'\s*/\s*(Maths|English|Physics|Chemistry|PLA|HOD|Dept\.?|Department)\b.*$','',nm,flags=re.I).strip()
+        nm=re.sub(r'^(Mr\.?|Ms\.?|Mrs\.?|Dr\.?|Prof\.?)\s*','',nm,flags=re.I).strip()
+        if not nm: return ''
+        key=nm.upper()
+        if key in name_to_code: return name_to_code[key]
+        code=(preferred_code or '').strip().upper()
+        if not code:
+            parts=re.findall(r'[A-Za-z]+', nm)
+            code=(''.join(p[0] for p in parts[:4]) or f'S{len(staff_dir)+1}').upper()
+        code=re.sub(r'[^A-Z0-9]','',code)[:6] or f'S{len(staff_dir)+1}'
+        base=code; k=2
+        while code in staff_dir and staff_dir[code].upper()!=nm.upper():
+            code=f"{base[:5]}{k}"; k+=1
+        staff_dir[code]=nm; name_to_code[key]=code
+        return code
+
+    def _parse_staff_cell(cell):
+        # "Ms.S.Chitra (SC), Mr.P.Prakash (PPR), Ms.S.Mekala (SM)" or "A / B"
+        out=[]
+        for part in re.split(r'\s*,\s*|\s*/\s*(?=[A-Z][a-z]|Mr|Ms|Mrs|Dr|Prof)', str(cell or '').strip()):
+            p=_norm(part)
+            if not p: continue
+            m=re.match(r'^(.*?)\(([A-Za-z0-9]{1,6})\)\s*$', p)
+            if m:
+                name=m.group(1).strip(' -'); code=m.group(2).strip().upper()
+                code=_add_staff(name, code) or code
+                if code: out.append(code)
+            else:
+                # maybe just name or code
+                if re.fullmatch(r'[A-Z]{1,6}', p.upper()) and p.upper() not in DAY_KEYS:
+                    out.append(p.upper())
+                else:
+                    code=_add_staff(p)
+                    if code: out.append(code)
+        # dedupe preserve order
+        seen=set(); res=[]
+        for c in out:
+            if c and c not in seen: seen.add(c); res.append(c)
+        return res
+
+    for r in rows:
+        if not _looks_staff_table_header(r): continue
+        cells=[_norm(x) for x in r]
+        # find staff incharge column index
+        staff_idx=None
+        for idx,h in enumerate(cells):
+            hu=h.upper()
+            if 'STAFF INCHARGE' in hu or hu=='STAFF' or 'FACULTY' in hu:
+                staff_idx=idx; break
+        if staff_idx is None: staff_idx=len(cells)-1
+        # consume following rows until blank/day header/next section header
+        start=rows.index(r)+1
+        for rr in rows[start:]:
+            cc=[_norm(x) for x in rr]
+            if not any(cc): continue
+            j=_joined(rr)
+            if _looks_day_header(j) or _looks_staff_table_header(rr): break
+            c0=cc[0].upper() if cc else ''
+            if c0 in DAY_KEYS: break
+            # likely a subject/staff row if first col looks like code or there's a staff cell
+            staff_cell=cc[staff_idx] if staff_idx < len(cc) else ''
+            code_cell=cc[0] if cc else ''
+            subj_cell=cc[1] if len(cc)>1 else ''
+            looks_code=bool(re.match(r'^\d{2}[A-Z]{2,}\d*$', code_cell.upper())) or c0 in ('OTHERS','OTHER')
+            if staff_cell and (looks_code or subj_cell or re.search(r'\([A-Za-z0-9]{1,6}\)', staff_cell)):
+                _parse_staff_cell(staff_cell)
+
+    # advisor code from parsed staff_dir
+    if advisor_name:
+        adv_clean=re.sub(r'^(Mr\.?|Ms\.?|Mrs\.?|Dr\.?|Prof\.?)\s*','',advisor_name,flags=re.I).strip()
+        advisor_code=name_to_code.get(adv_clean.upper(),'') or name_to_code.get(advisor_name.upper(),'')
+        if not advisor_code:
+            advisor_code=_add_staff(advisor_name)
     if not cls:
-        errors.append('Class not found. Include CLASS line or choose class.')
+        errors.append('Class not found. Include CLASS line or choose class in the form.')
     elif not is_valid_class_name(cls):
         errors.append(f'Invalid class "{cls}". Use YYIT<sem><section>.')
-    # map advisor by matching name in staff_incharge
-    def _code_from_name(name, idx):
-        parts=re.findall(r'[A-Za-z]+', name or '')
-        code=(''.join(p[0] for p in parts[:3]) or f'S{idx}').upper()
-        return code[:4]
-    staff_dir={}
-    name_to_code={}
-    for i,n in enumerate(staff_incharge, start=1):
-        nm=_norm(n)
-        if not nm: continue
-        code=_code_from_name(nm,i)
-        base=code; k=2
-        while code in staff_dir and staff_dir[code]!=nm:
-            code=f"{base[:3]}{k}"; k+=1
-        staff_dir[code]=nm; name_to_code[nm.upper()]=code
-    if advisor_name:
-        advisor_code=name_to_code.get(advisor_name.upper(),'')
-        if not advisor_code:
-            advisor_code=_code_from_name(advisor_name,99)
-            staff_dir.setdefault(advisor_code, advisor_name)
-            name_to_code[advisor_name.upper()]=advisor_code
-    # parse schedule
-    schedule={d:[] for d in DAY_KEYS}
-    day_rows=[r for r in rows if _norm(r[0]).upper() in DAY_KEYS] if rows else []
+
+    # --- locate day/hour header and parse schedule ---
+    day_header_idx=None; day_col=0; period_cols=[]
+    for i,r in enumerate(rows):
+        j=_joined(r)
+        if not _looks_day_header(j):
+            continue
+        # find day column and period columns
+        day_col=0
+        for idx,c in enumerate(r):
+            cu=_norm(c).upper()
+            if 'DAY' in cu: day_col=idx; break
+        # map period columns: headers containing 1..7 or (time)
+        pcols=[]
+        for idx,c in enumerate(r):
+            if idx==day_col: continue
+            cu=_norm(c).upper()
+            m=re.search(r'\b([1-7])\b', cu)
+            if m:
+                p=int(m.group(1))
+                if 1<=p<=7 and all(pc!=idx for pc,_ in pcols):
+                    pcols.append((idx,p))
+        if not pcols:
+            # assume next 7 cols after day col
+            pcols=[(day_col+1+k,k+1) for k in range(7) if day_col+1+k < max(len(r),day_col+8)]
+        period_cols=sorted(pcols,key=lambda x:x[1])
+        day_header_idx=i
+        break
+
+    day_rows=[]
+    if day_header_idx is not None:
+        for r in rows[day_header_idx+1:]:
+            c0=_norm(r[day_col] if day_col < len(r) else (r[0] if r else '')).upper()
+            c0=re.sub(r'[^A-Z]', '', c0)
+            # normalize full names
+            day_map={'MONDAY':'MON','TUESDAY':'TUE','WEDNESDAY':'WED','THURSDAY':'THU','FRIDAY':'FRI','SATURDAY':'SAT','SUNDAY':'SUN'}
+            c0=day_map.get(c0,c0[:3])
+            if c0 in DAY_KEYS:
+                day_rows.append((c0,r))
+            elif c0 in ('CODE','OTHERS','OTHER','TOTAL','SUBJECT'):
+                break
+            elif any(_norm(x) for x in r) and not any(ch.isalpha() for ch in c0):
+                continue
+    else:
+        # fallback: any row starting with day
+        for r in rows:
+            c0=_norm(r[0] if r else '').upper(); c0=re.sub(r'[^A-Z]','',c0)
+            day_map={'MONDAY':'MON','TUESDAY':'TUE','WEDNESDAY':'WED','THURSDAY':'THU','FRIDAY':'FRI','SATURDAY':'SAT','SUNDAY':'SUN'}
+            c0=day_map.get(c0,c0[:3])
+            if c0 in DAY_KEYS: day_rows.append((c0,r))
+
     if not day_rows:
-        errors.append('No DAY/PERIOD rows found (MON..SAT).')
-    for rownum,r in enumerate(day_rows, start=1):
-        day=_norm(r[0]).upper()
-        # expect 1..7 in columns 1..7
-        cells=r[1:8]
-        while len(cells)<7: cells.append('')
+        errors.append('No DAY/PERIOD rows found. Use a header like Day/Hour with Monday..Saturday rows.')
+
+    for day,r in day_rows:
         prev=None
-        for p,cell in enumerate(cells, start=1):
-            txt=_norm(cell)
-            if not txt or txt.upper() in {'FREE','-','NIL'}:
+        for col_idx,p in period_cols:
+            txt=_norm(r[col_idx]) if col_idx < len(r) else ''
+            if not txt or txt.upper() in {'FREE','-','NIL','NA','N/A'}:
                 prev=None; continue
-            if txt=='"' or txt.upper()=='SAME':
+            if txt in {'"', '""', "'"} or txt.upper()=='SAME':
                 if prev:
                     cpy=dict(prev); cpy['period']=p; cpy['display']=cpy.get('subject','')+ ((' ('+', '.join(cpy.get('staff',[]))+')') if cpy.get('staff') else '')
                     schedule[day].append(cpy)
                 continue
-            # parse SUBJECT - STAFF (HALL) or SUBJECT (STAFF)
+            # parse SUBJECT (STAFF,STAFF) or SUBJECT - STAFF (HALL)
             hall_m=re.search(r'\(([^()]*)\)\s*$', txt)
-            hall_cell=hall_m.group(1).strip() if hall_m else ''
+            paren=hall_m.group(1).strip() if hall_m else ''
             core=txt[:hall_m.start()].strip() if hall_m else txt
             subj=core; staff_names=[]
+            hall_cell=''
             if ' - ' in core:
                 left,right=core.rsplit(' - ',1)
                 subj=left.strip(); staff_names=[x.strip() for x in re.split(r',|/|&', right) if x.strip()]
-            elif hall_cell and re.search(r'[A-Za-z]', hall_cell) and len(hall_cell)<=40:
-                # maybe (STAFF) form
-                staff_names=[x.strip() for x in re.split(r',|/|&', hall_cell) if x.strip()]
-                hall_cell=''
+            # decide whether paren is staff codes/names or hall
+            paren_is_staff=False
+            if paren:
+                if re.search(r'\b[A-Z]{1,6}\b', paren.upper()) and len(paren)<=60:
+                    paren_is_staff=True
+                if re.search(r',|/|&', paren): paren_is_staff=True
+                if 'LAB' in paren.upper() and not re.search(r'\([A-Z]{1,6}\)', '('+paren+')'): pass
+            if paren_is_staff:
+                codes=_parse_staff_cell(paren)
+                if codes:
+                    staff_names=codes
+                else:
+                    hall_cell=paren
+            elif paren:
+                hall_cell=paren
+            # resolve staff names/codes
             codes=[]
             for sn in staff_names:
-                key=sn.upper()
-                code=name_to_code.get(key)
-                if not code:
-                    code=_code_from_name(sn,len(staff_dir)+1)
-                    base=code; k=2
-                    while code in staff_dir and staff_dir[code]!=sn:
-                        code=f"{base[:3]}{k}"; k+=1
-                    staff_dir[code]=sn; name_to_code[key]=code
-                codes.append(code)
-            is_lab='LAB' in subj.upper() or hall_cell.upper().endswith('LAB') or 'LAB' in hall_cell.upper()
+                if re.fullmatch(r'[A-Z0-9]{1,6}', sn.upper()):
+                    c=sn.upper()
+                    if c not in staff_dir: staff_dir[c]=c
+                    codes.append(c)
+                else:
+                    c=_add_staff(sn)
+                    if c: codes.append(c)
+            is_lab='LAB' in subj.upper() or 'LAB' in hall_cell.upper()
             disp=subj + (f" ({', '.join(codes)})" if codes else '')
             cell_obj={'period':p,'subject':subj,'staff':codes,'display':disp}
             if is_lab: cell_obj['is_lab']=True
             schedule[day].append(cell_obj); prev=cell_obj
-    slots=[{'period':i,'label':f'Hour {i}','start':['09:00','09:45','10:50','11:40','13:20','14:15','15:20'][i-1],'end':['09:45','10:35','11:40','12:30','14:15','15:10','16:15'][i-1]} for i in range(1,8)]
+
+    # normalize/merge slots by period
+    if period_cols:
+        slot_map={}
+        for col_idx,p in period_cols:
+            hdr=_norm(rows[day_header_idx][col_idx]) if day_header_idx is not None and col_idx < len(rows[day_header_idx]) else f'Period {p}'
+            tm=re.findall(r'(\d{1,2}[\.:]\d{2})', hdr)
+            start=tm[0].replace('.',':') if len(tm)>0 else ['09:00','09:45','10:50','11:40','13:20','14:15','15:20'][p-1]
+            end=tm[1].replace('.',':') if len(tm)>1 else ['09:45','10:35','11:40','12:30','14:15','15:10','16:15'][p-1]
+            slot_map[p]={'period':p,'label':f'Hour {p}','start':start,'end':end}
+        slots=[slot_map[p] for p in sorted(slot_map)]
+    if not slots:
+        slots=[{'period':i,'label':f'Hour {i}','start':['09:00','09:45','10:50','11:40','13:20','14:15','15:20'][i-1],'end':['09:45','10:35','11:40','12:30','14:15','15:10','16:15'][i-1]} for i in range(1,8)]
+
     payload={
         'class':cls or '', 'hall':hall,
         'class_advisor':{'name':advisor_name,'initials':advisor_code,'is_hod':False},
@@ -2283,6 +2440,7 @@ def _parse_timetable_import(text, class_hint='', semester_id=None):
         errors.extend(verrors); warnings.extend(vwarn)
     return {'ok':len(errors)==0,'errors':errors,'warnings':warnings,'data':payload,'class':cls,
             'semester_id':semester_id,'staff_count':len(staff_dir),'advisor':payload['class_advisor']}
+
 @app.route('/api/admin/timetable/reference/file/<path:filename>')
 @admin_required
 def api_admin_timetable_reference_file(filename):
