@@ -11,7 +11,8 @@
       </div>
     </div>
     <form class="row g-2 no-print" method="get" action="/attendance_record" id="recordFilterForm">
-      <div class="col-6 col-md-2"><select name="semester_id" class="form-select form-select-sm"><option value="">All time</option>{% for s in semesters %}<option value="{{ s.id }}" {% if semester_id==s.id %}selected{% endif %}>{{ s.label }}</option>{% endfor %}</select></div>
+      <div class="col-6 col-md-2"><select name="batch_start_year" class="form-select form-select-sm"><option value="">Legacy/all batches</option>{% for b in batches or [] %}<option value="{{ b.batch_start_year }}" {% if batch_start_year==b.batch_start_year %}selected{% endif %}>{{ b.label }}</option>{% endfor %}</select></div>
+      <div class="col-6 col-md-2"><select name="sem_no" class="form-select form-select-sm"><option value="">All sems</option>{% for s in semesters %}{% if s.sem_no %}<option value="{{ s.sem_no }}" {% if selected_sem_no==s.sem_no %}selected{% endif %}>Sem {{ s.sem_no }} | {{ s.label }}</option>{% endif %}{% endfor %}</select></div>
       <div class="col-6 col-md-2"><select name="period" class="form-select form-select-sm"><option value="daily" {% if period=='daily' %}selected{% endif %}>Today</option><option value="weekly" {% if period=='weekly' %}selected{% endif %}>Last 7 days</option><option value="monthly" {% if period=='monthly' %}selected{% endif %}>Last 30 days</option><option value="all" {% if period=='all' %}selected{% endif %}>All</option></select></div>
       <div class="col-6 col-md-2"><input type="date" name="from" class="form-control form-control-sm" value="{{ date_from or '' }}"></div>
       <div class="col-6 col-md-2"><input type="date" name="to" class="form-control form-control-sm" value="{{ date_to or '' }}"></div>

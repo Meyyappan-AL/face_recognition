@@ -1440,8 +1440,13 @@ def admin_student_attendance(sid):
     semester_id=_norm(request.args.get('semester_id')); date_from=_norm(request.args.get('from')); date_to=_norm(request.args.get('to')); status=_norm(request.args.get('status')); period=_norm(request.args.get('period'))
     student,details,summary,filters=_admin_student_attendance_data(sid,semester_id,date_from,date_to,status,period)
     if not student: abort(404)
+    cls=student.get('class') or ''
+    info=parse_cohort_class(cls); by=info.get('batch_start_year') if info else None
+    sem_rows=_semester_rows(batch_start_year=by, include_legacy=by is None) if by else _semester_rows()
+    cur_no=current_sem_for_batch(by) if by else None
+    sem_opts=[_semester_json(s,batch_start_year=by,on_date=_today_ist_str()) for s in sem_rows if not by or s.get('batch_start_year')==by]
     return render_template('admin_student_attendance.html', student=student, details=details, summary=summary,
-                           semesters=[_semester_json(s) for s in _semester_rows()], semester_id=filters['semester_id'],
+                           semesters=sem_opts, semester_id=filters['semester_id'], current_sem_no=cur_no, batch_start_year=by,
                            date_from=filters['date_from'], date_to=filters['date_to'], status=filters['status'], period=filters['period'])
 
 @app.route('/admin/students/<int:sid>/attendance/export')
@@ -3721,6 +3726,10 @@ def attendance_record():
     if absence not in ('any','full_day','partial_day','period_wise','none'): absence='any'
     sem_id=(request.args.get('semester_id') or '').strip()
     sem=_semester_by_id(sem_id) if sem_id else None
+    sem_no_raw=request.args.get('sem_no'); by_raw=request.args.get('batch_start_year')
+    if not sem and sem_no_raw not in (None,'') and by_raw not in (None,''):
+        try: sem=_batch_semester_row(int(by_raw),int(sem_no_raw))
+        except Exception: sem=None
     if sem and not dfrom and not dto:
         sd1,sd2=_semester_window(sem, cls or None); report_from=sd1.isoformat(); report_to=sd2.isoformat()
     else:
@@ -3785,10 +3794,28 @@ def attendance_record():
                             'first_in_fmt':'','last_out_fmt':'','duration':'','roll':reg or '','section':'','manual':f'{pcount} credited, {acount} absent, {pct}%'} )
     note='Period-session manual attendance (submitted sessions). Unmarked "-" rows are excluded; N counts as absent. Changes/overrides update attendance entries and are reflected in reports/student log. Missing exit never marks absent.'
     if session.get('role')!='admin': note+=' Staff view covers only sessions handled/submitted by you.'
+    role=session.get('role') or 'staff'
+    by=None
+    if by_raw not in (None,''):
+        try: by=int(by_raw)
+        except Exception: by=None
+    if by is None and cls:
+        info=parse_cohort_class(cls)
+        if info: by=info.get('batch_start_year')
+    today_s=_today_ist_str()
+    if by is not None:
+        ensure_batch_semesters(by, actor=session.get('username') or 'system')
+        visible, _cur_no = visible_sem_nos(role, by, on_date=today_s)
+        sem_rows=_semester_rows(batch_start_year=by, include_legacy=False)
+        sem_list=[_semester_json(x,batch_start_year=by,on_date=today_s) for x in sem_rows if role=='admin' or int(x.get('sem_no') or 0) in set(visible)]
+    else:
+        sem_list=[_semester_json(x,on_date=today_s) for x in _semester_rows()]
+    batches=[{'batch_start_year':b,'label':batch_label(b)} for b in BATCH_START_YEARS]
     return render_template('attendance_record.html', session_rows=session_rows, session_roles=session_roles, period=period, class_name=cls, report_rows=report_rows,
-                           semesters=[_semester_json(s) for s in _semester_rows()], semester_id=(sem or {}).get('id'), absence=absence,
+                           semesters=sem_list, semester_id=(sem or {}).get('id'), absence=absence,
                            date_from=report_from, date_to=report_to, erp_classes=get_classes(),
-                           summary={'total':total,'present':present,'absent':absent,'note':note})
+                           summary={'total':total,'present':present,'absent':absent,'note':note},
+                           batches=batches, batch_start_year=by, selected_sem_no=(int(sem_no_raw) if str(sem_no_raw or '').isdigit() else None))
 
 @app.route('/download_csv', methods=['GET'])
 @staff_required
@@ -5384,10 +5411,29 @@ def api_student_dashboard():
     now_ist=_now_ist(); today=now_ist.date()
     qfrom=request.args.get('from'); qto=request.args.get('to'); qsem=request.args.get('semester_id')
     sem=_semester_by_id(qsem) if qsem else None
-    if not sem and not (qfrom and qto): sem=_current_semester()
+    sem_no_raw=request.args.get('sem_no')
+    by_raw=request.args.get('batch_start_year')
+    info=parse_cohort_class(class_name)
+    by_hint=by_raw if by_raw not in (None,'') else (info.get('batch_start_year') if info else None)
+    if by_hint is not None:
+        try: ensure_batch_semesters(int(by_hint), actor=session.get('username') or 'system')
+        except Exception: pass
+    if not sem and sem_no_raw not in (None,''):
+        try:
+            if by_hint is not None: sem=_batch_semester_row(int(by_hint), int(sem_no_raw))
+        except Exception: sem=None
+    if not sem and not (qfrom and qto):
+        info=parse_cohort_class(class_name)
+        by=info.get('batch_start_year') if info else None
+        if by is not None:
+            cur_no=current_sem_for_batch(by, on_date=today.isoformat())
+            sem=_batch_semester_row(by, cur_no)
+        else:
+            sem=_current_semester()
     if sem:
         d1,d2=_semester_window(sem, class_name, today)
-        sem_meta={'id':sem.get('id'),'label':sem.get('label') or 'Semester','from':d1.isoformat(),'to':d2.isoformat(),'is_current':int(sem.get('is_current') or 0)}
+        sem_meta={'id':sem.get('id'),'label':sem.get('label') or 'Semester','from':d1.isoformat(),'to':d2.isoformat(),
+                  'is_current':int(sem.get('is_current') or 0),'sem_no':sem.get('sem_no'),'batch_start_year':sem.get('batch_start_year')}
     else:
         d1=_parse_iso_date(qfrom); d2=_parse_iso_date(qto)
         conn0=_db(); c0=conn0.cursor()
@@ -5582,9 +5628,21 @@ def api_student_dashboard():
         timetable={'slots':sorted((tt.get('slots') or []), key=lambda x:int(x.get('period') or 0)), 'schedule':tt.get('schedule') or {}, 'advisor':tt.get('class_advisor') or {}, 'class_name':class_name}
     except Exception:
         timetable={}
-    sem_list=[_semester_json(s) for s in _semester_rows()]
+    info=parse_cohort_class(class_name)
+    by=info.get('batch_start_year') if info else None
+    sem_rows=_semester_rows(batch_start_year=by, include_legacy=(by is None))
+    if by is not None:
+        ensure_batch_semesters(by, actor=session.get('username') or 'system')
+        sem_rows=_semester_rows(batch_start_year=by, include_legacy=False)
+        visible,_cur_no=visible_sem_nos('student',by,on_date=today.isoformat())
+        sem_rows=[s for s in sem_rows if int(s.get('sem_no') or 0) in set(visible)]
+    sem_list=[_semester_json(s,batch_start_year=by,on_date=today.isoformat()) for s in sem_rows]
     absent_items.sort(key=lambda x:(x['date'],x['period']), reverse=True)
     export_qs={'semester_id':sem_meta['id']} if sem_meta.get('id') else {'from':d1.isoformat(),'to':d2.isoformat()}
+    if sem_meta.get('id'):
+        sm=_semester_by_id(sem_meta['id'])
+        if sm and sm.get('sem_no') is not None: export_qs['sem_no']=sm.get('sem_no')
+        if sm and sm.get('batch_start_year') is not None: export_qs['batch_start_year']=sm.get('batch_start_year')
     return jsonify({'ok':True,'student':st,'overview':overview,'semester':sem_meta,'semesters':sem_list,
                     'grid':grid,'absent_audit':absent_items[:500],'calendar_upcoming':cal_up,'timetable':timetable,'periods':list(range(1,8)),
                     'subjects':subjects,'today_classes':today_classes,'next_class':next_class,
@@ -5601,12 +5659,21 @@ def student_export_csv():
     class_name=(student[3] or '').strip(); today=_now_ist().date()
     qsem=request.args.get('semester_id'); qfrom=request.args.get('from'); qto=request.args.get('to')
     sem=_semester_by_id(qsem) if qsem else None
+    sem_no_raw=request.args.get('sem_no'); by_raw=request.args.get('batch_start_year')
+    if not sem and sem_no_raw not in (None,''):
+        info=parse_cohort_class(class_name)
+        by=by_raw if by_raw not in (None,'') else (info.get('batch_start_year') if info else None)
+        try:
+            if by is not None: sem=_batch_semester_row(int(by), int(sem_no_raw))
+        except Exception: sem=None
     if sem:
         d1,d2=_semester_window(sem,class_name,today)
     else:
         d1=_parse_iso_date(qfrom); d2=_parse_iso_date(qto)
         if not d1 or not d2:
-            sem=_current_semester()
+            info=parse_cohort_class(class_name); by=info.get('batch_start_year') if info else None
+            if by is not None: sem=_batch_semester_row(by, current_sem_for_batch(by,on_date=today.isoformat()))
+            else: sem=_current_semester()
             if sem:
                 d1,d2=_semester_window(sem,class_name,today)
             else:
@@ -6631,6 +6698,10 @@ def download_period_csv():
     absence=(request.args.get('absence') or 'any').strip().lower()
     if absence not in ('any','full_day','partial_day','period_wise','none'): absence='any'
     sem=_semester_by_id(request.args.get('semester_id')) if request.args.get('semester_id') else None
+    sem_no_raw=request.args.get('sem_no'); by_raw=request.args.get('batch_start_year')
+    if not sem and sem_no_raw not in (None,'') and by_raw not in (None,''):
+        try: sem=_batch_semester_row(int(by_raw),int(sem_no_raw))
+        except Exception: sem=None
     if sem and not dfrom and not dto:
         sd1,sd2=_semester_window(sem, cls or None); report_from=sd1.isoformat(); report_to=sd2.isoformat()
     else:
@@ -6718,7 +6789,39 @@ def admin_edit_student(sid):
 @app.route('/reports')
 @staff_required
 def reports_page():
-    return render_template('reports.html', user=_current_user(), classes=get_classes(), semesters=[_semester_json(s) for s in _semester_rows()], current_semester_id=(_current_semester() or {}).get('id'))
+    role=session.get('role') or 'staff'
+    cls=(request.args.get('class') or '').strip()
+    by_raw=request.args.get('batch_start_year')
+    sem_no_raw=request.args.get('sem_no')
+    by=None
+    if by_raw not in (None,''):
+        try: by=int(by_raw)
+        except Exception: by=None
+    if by is None and cls:
+        info=parse_cohort_class(cls)
+        if info: by=info.get('batch_start_year')
+    today=_today_ist_str()
+    sem_opts=[]
+    current_semester_id=None
+    current_sem_no=None
+    if by is not None:
+        ensure_batch_semesters(by, actor=session.get('username') or 'system')
+        visible, cur_no = visible_sem_nos(role, by, on_date=today)
+        sem_rows=_semester_rows(batch_start_year=by, include_legacy=False)
+        sem_opts=[_semester_json(s,batch_start_year=by,on_date=today) for s in sem_rows if role=='admin' or int(s.get('sem_no') or 0) in set(visible)]
+        current_sem_no=cur_no
+        sel_sem=None
+        if sem_no_raw not in (None,''):
+            try: sel_sem=next((s for s in sem_opts if int(s.get('sem_no') or 0)==int(sem_no_raw)), None)
+            except Exception: sel_sem=None
+        current_semester_id=(sel_sem or next((s for s in sem_opts if int(s.get('sem_no') or 0)==int(cur_no)), (sem_opts[0] if sem_opts else None)) or {}).get('id')
+    else:
+        rows=_semester_rows()
+        sem_opts=[_semester_json(s,on_date=today) for s in rows]
+        cur=_current_semester(); current_semester_id=cur.get('id') if cur else (sem_opts[0]['id'] if sem_opts else None)
+    batches=[{'batch_start_year':b,'label':batch_label(b)} for b in BATCH_START_YEARS]
+    return render_template('reports.html', user=_current_user(), classes=get_classes(), semesters=sem_opts, current_semester_id=current_semester_id,
+                           batches=batches, batch_start_year=by, current_sem_no=current_sem_no, selected_sem_no=(int(sem_no_raw) if str(sem_no_raw or '').isdigit() else current_sem_no))
 
 
 # --- ERP: OD history, admin settings, analytics ---
@@ -6959,6 +7062,11 @@ def service_worker_file():
 def api_analytics_overview():
     cls=(request.args.get('class') or '').strip(); dfrom,dto=_clean_date_pair(request.args.get('from'),request.args.get('to'))
     sem=_semester_by_id(request.args.get('semester_id')) if request.args.get('semester_id') else None
+    sem_no_raw=request.args.get('sem_no')
+    by_raw=request.args.get('batch_start_year')
+    if not sem and sem_no_raw not in (None,'') and by_raw not in (None,''):
+        try: sem=_batch_semester_row(int(by_raw), int(sem_no_raw))
+        except Exception: sem=None
     if sem and not dfrom and not dto:
         sd1,sd2=_semester_window(sem, cls or None)
         dfrom=sd1.isoformat(); dto=sd2.isoformat()
@@ -7056,6 +7164,11 @@ def api_analytics_insights():
     if mode not in ('class','staff','period','student'): mode='class'
     if not is_admin and mode not in ('class','student'): mode='class'
     sem=_semester_by_id(request.args.get('semester_id')) if request.args.get('semester_id') else None
+    sem_no_raw=request.args.get('sem_no')
+    by_raw=request.args.get('batch_start_year')
+    if not sem and sem_no_raw not in (None,'') and by_raw not in (None,''):
+        try: sem=_batch_semester_row(int(by_raw), int(sem_no_raw))
+        except Exception: sem=None
     if sem and not dfrom and not dto:
         sd1,sd2=_semester_window(sem, cls or None)
         dfrom=sd1.isoformat(); dto=sd2.isoformat()
@@ -7215,6 +7328,10 @@ def download_defaulters_csv():
     absence=(request.args.get('absence') or 'any').strip().lower()
     if absence not in ('any','full_day','partial_day','period_wise','none'): absence='any'
     sem=_semester_by_id(request.args.get('semester_id')) if request.args.get('semester_id') else None
+    sem_no_raw=request.args.get('sem_no'); by_raw=request.args.get('batch_start_year')
+    if not sem and sem_no_raw not in (None,'') and by_raw not in (None,''):
+        try: sem=_batch_semester_row(int(by_raw),int(sem_no_raw))
+        except Exception: sem=None
     if sem and not dfrom and not dto:
         sd1,sd2=_semester_window(sem, cls or None); report_from=sd1.isoformat(); report_to=sd2.isoformat()
     else:

@@ -109,7 +109,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const target=(semesterId===undefined? selectedSemester : semesterId);
     msg('Loading dashboard...');
     try {
-      const qs=target?('?semester_id='+encodeURIComponent(target)):'';
+      const sel=$('semSelect');
+      const opt=sel?.selectedOptions?.[0];
+      const semNo=opt?.getAttribute('data-sem-no')||'';
+      const batch=opt?.getAttribute('data-batch')||'';
+      const params=new URLSearchParams();
+      if(semNo) params.set('sem_no',semNo);
+      if(batch) params.set('batch_start_year',batch);
+      if(!semNo && target) params.set('semester_id',target);
+      const qs=params.toString()?('?'+params.toString()):'';
       const r = await fetch('/api/student/dashboard'+qs, {credentials:'same-origin'});
       const d = await r.json().catch(()=>({}));
       if (!r.ok || !d.ok) { msg(d.error || 'Failed to load dashboard.', 'text-danger'); renderFallback(); return; }
@@ -161,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(sel){
       const opts=d.semesters||[];
       if(sel.dataset.sig!==JSON.stringify(opts.map(x=>x.id))){
-        sel.innerHTML=opts.map(s=>`<option value="${s.id}">${esc(s.label)}${s.is_current?' (current)':''}${s.start_date?' | '+esc(s.start_date):''}${s.end_date?' to '+esc(s.end_date):''}</option>`).join('');
+        sel.innerHTML=opts.map(s=>`<option value="${s.id}" data-sem-no="${s.sem_no||''}" data-batch="${s.batch_start_year||''}">Sem ${esc(s.sem_no||'?')} | ${esc(s.label)}${s.is_current||s.status==='current'?' (current)':''}${s.start_date?' | '+esc(s.start_date):''}${s.end_date?' to '+esc(s.end_date):''}</option>`).join('');
         sel.dataset.sig=JSON.stringify(opts.map(x=>x.id));
       }
       if(o.semester_id) sel.value=String(o.semester_id);

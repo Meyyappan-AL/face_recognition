@@ -9,9 +9,13 @@
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2 no-print">
         <div><h5 class="erp-section-title">Attendance insight filters</h5><div class="erp-muted" id="semesterNote">Select a semester or a custom date range.</div></div>
         <div class="d-flex gap-2 flex-wrap">
+          <select id="fBatch" class="form-select form-select-sm" style="width:auto" title="Batch">
+            <option value="">Legacy/all batches</option>
+            {% for b in batches or [] %}<option value="{{ b.batch_start_year }}" {% if batch_start_year==b.batch_start_year %}selected{% endif %}>{{ b.label }}</option>{% endfor %}
+          </select>
           <select id="fSemester" class="form-select form-select-sm" style="width:auto" title="Semester">
             <option value="">All time</option>
-            {% for s in semesters %}<option value="{{ s.id }}" {% if s.id==current_semester_id %}selected{% endif %}>{{ s.label }}{% if s.start_date %} | {{ s.start_date }}{% endif %}{% if s.end_date %} to {{ s.end_date }}{% endif %}</option>{% endfor %}
+            {% for s in semesters %}<option value="{{ s.id }}" data-sem-no="{{ s.sem_no or '' }}" data-batch="{{ s.batch_start_year or '' }}" {% if s.id==current_semester_id %}selected{% endif %}>Sem {{ s.sem_no or '?' }} | {{ s.label }}{% if s.start_date %} | {{ s.start_date }}{% endif %}{% if s.end_date %} to {{ s.end_date }}{% endif %}</option>{% endfor %}
           </select>
           <select id="fClass" class="form-select form-select-sm" style="width:auto"><option value="">All classes</option>{% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
           <input type="date" id="fFrom" class="form-control form-control-sm" style="width:auto" title="From">
@@ -120,9 +124,15 @@
   const COLORS={present:'#16a34a',absent:'#dc2626',late:'#f59e0b',od:'#2563eb',medical:'#7c3aed',other:'#64748b',unmarked:'#94a3b8'};
   let statusChart=null, compareChart=null, students=[], defaulters=[];
 
+  function selectedSemNo(){
+    const opt=$('fSemester').selectedOptions[0];
+    return opt ? (opt.getAttribute('data-sem-no')||'') : '';
+  }
   function params(){
     const p=new URLSearchParams();
-    if($('fSemester').value) p.set('semester_id',$('fSemester').value);
+    if($('fBatch').value) p.set('batch_start_year',$('fBatch').value);
+    const semNo=selectedSemNo();
+    if(semNo) p.set('sem_no',semNo); else if($('fSemester').value) p.set('semester_id',$('fSemester').value);
     if($('fClass').value) p.set('class',$('fClass').value);
     if($('fFrom').value) p.set('from',$('fFrom').value);
     if($('fTo').value) p.set('to',$('fTo').value);
@@ -203,7 +213,9 @@
       }
       const qs=new URLSearchParams();
       if($('fClass').value) qs.set('class',$('fClass').value);
-      if($('fSemester').value) qs.set('semester_id',$('fSemester').value);
+      if($('fBatch').value) qs.set('batch_start_year',$('fBatch').value);
+      const semNo=selectedSemNo();
+      if(semNo) qs.set('sem_no',semNo); else if($('fSemester').value) qs.set('semester_id',$('fSemester').value);
       if($('fFrom').value) qs.set('from',$('fFrom').value);
       if($('fTo').value) qs.set('to',$('fTo').value);
       if($('fAbsence').value && $('fAbsence').value!=='any') qs.set('absence',$('fAbsence').value);
@@ -224,6 +236,7 @@
 
   $('applyBtn').addEventListener('click', load);
   $('fCompare').addEventListener('change', load);
+  $('fBatch').addEventListener('change', ()=>{ const by=$('fBatch').value; const u=new URL('/reports', window.location.origin); if(by) u.searchParams.set('batch_start_year',by); if($('fClass').value) u.searchParams.set('class',$('fClass').value); window.location=u.toString(); });
   $('fSemester').addEventListener('change', ()=>{ $('fFrom').value=''; $('fTo').value=''; load(); });
   $('studentSearch').addEventListener('input', renderStudents);
   load();
