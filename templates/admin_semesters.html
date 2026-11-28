@@ -1,41 +1,65 @@
 {% extends "base.html" %}
 {% block title %}Semesters{% endblock %}
 {% block content %}
-  <div class="container" style="max-width:1100px">
-    <div class="row g-3">
-      <div class="col-lg-5">
-        <div class="card erp-card p-3">
-          <h5 class="erp-section-title mb-1" id="formTitle">Add Semester</h5>
-          <div class="erp-muted mb-3">One semester is marked current. Current semester runs from start date to today; completed semesters run to the last scheduled working day. Students and staff can pick any semester from their dropdowns.</div>
-          <form id="semForm">
-            <input type="hidden" name="id" id="semId">
-            <div class="mb-2"><label class="form-label small">Label *</label><input class="form-control form-control-sm" name="label" id="semLabel" placeholder="e.g. Semester 5 (2026-27)" required></div>
-            <div class="row g-2">
-              <div class="col-6"><label class="form-label small">Start date</label><input class="form-control form-control-sm" type="date" name="start_date" id="semStart"></div>
-              <div class="col-6"><label class="form-label small">End date</label><input class="form-control form-control-sm" type="date" name="end_date" id="semEnd"></div>
-            </div>
-            <div class="form-check my-2"><input class="form-check-input" type="checkbox" name="is_current" id="semCurrent"><label class="form-check-label small" for="semCurrent">Mark as current semester</label></div>
-            <div class="d-flex gap-2">
-              <button class="btn btn-primary btn-sm" type="submit">Save Semester</button>
-              <button class="btn btn-outline-secondary btn-sm" type="button" id="resetBtn">New</button>
-            </div>
-            <div id="semMsg" class="small mt-2"></div>
-          </form>
+  <div class="container-fluid" style="max-width:1200px">
+    <div class="card erp-card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <h5 class="erp-section-title mb-1">Batch Semesters & Rollover</h5>
+          <div class="erp-muted">Per-batch S1-S8 calendar. Default odd sem: 01/08-31/12, even sem: 01/01-20/04. Admin can edit dates. Students/staff see started sems only; admin sees all 1-8.</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+          <div>
+            <label class="form-label small mb-1" for="batchSelect">Batch</label>
+            <select id="batchSelect" class="form-select form-select-sm"></select>
+          </div>
+          <button id="resetBatchBtn" class="btn btn-outline-secondary btn-sm" type="button">Reset batch defaults</button>
+          <button id="reloadBtn" class="btn btn-outline-primary btn-sm" type="button">Refresh</button>
         </div>
       </div>
-      <div class="col-lg-7">
+      <div id="topMsg" class="small mt-2 text-muted"></div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-8">
         <div class="card erp-card p-3">
           <div class="d-flex justify-content-between align-items-center mb-2">
-            <h5 class="erp-section-title mb-0">Semester list</h5>
-            <button class="btn btn-outline-secondary btn-sm" id="reloadBtn">Refresh</button>
+            <h6 class="erp-section-title mb-0">Sem 1-8 calendar</h6>
+            <div id="batchMeta" class="small text-muted"></div>
           </div>
           <div class="erp-table-wrap">
             <table class="table table-sm erp-table align-middle mb-0">
-              <thead><tr><th>Label</th><th>Start</th><th>End</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody id="semBody"><tr><td colspan="5" class="erp-empty">Loading...</td></tr></tbody>
+              <thead><tr><th>Sem</th><th>Label</th><th>Start</th><th>End</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="semBody"><tr><td colspan="6" class="erp-empty">Loading...</td></tr></tbody>
             </table>
           </div>
-          <div class="erp-muted mt-2">Deleting the current semester promotes the most recent remaining semester. Date changes also update the legacy ERP settings for compatibility.</div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="card erp-card p-3 mb-3">
+          <h6 class="erp-section-title mb-2">Edit selected semester</h6>
+          <form id="semForm">
+            <input type="hidden" id="semNo">
+            <div class="mb-2"><label class="form-label small">Label</label><input class="form-control form-control-sm" id="semLabel"></div>
+            <div class="mb-2"><label class="form-label small">Start date</label><input class="form-control form-control-sm" type="date" id="semStart"></div>
+            <div class="mb-2"><label class="form-label small">End date</label><input class="form-control form-control-sm" type="date" id="semEnd"></div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-primary btn-sm" type="submit">Save sem</button>
+              <button id="resetSemBtn" class="btn btn-outline-secondary btn-sm" type="button">Reset sem default</button>
+            </div>
+          </form>
+          <div id="formMsg" class="small mt-2"></div>
+        </div>
+
+        <div class="card erp-card p-3">
+          <h6 class="erp-section-title mb-2">Advance semester / rollover</h6>
+          <div class="erp-muted small mb-2">Admin-triggered. Updates current-state class mappings only (students, advisor class, cohort current class, current timetable mirror). Historical records keep stored class names.</div>
+          <div class="mb-2"><label class="form-label small">Target sem</label><select id="rollSem" class="form-select form-select-sm">{% for n in range(1,9) %}<option value="{{n}}">Sem {{n}}</option>{% endfor %}</select></div>
+          <div class="d-flex gap-2 mb-2">
+            <button id="previewRollBtn" class="btn btn-outline-primary btn-sm" type="button">Preview</button>
+            <button id="applyRollBtn" class="btn btn-danger btn-sm" type="button">Apply rollover</button>
+          </div>
+          <pre id="rollOut" class="small mb-0" style="white-space:pre-wrap"></pre>
         </div>
       </div>
     </div>
@@ -43,49 +67,117 @@
 {% endblock %}
 {% block scripts %}
 <script>
-const $=id=>document.getElementById(id);
-const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-function msg(t,c='text-muted'){const e=$('semMsg'); e.className='small mt-2 '+c; e.textContent=t||'';}
-let rows=[];
-function resetForm(){ $('semId').value=''; $('semLabel').value=''; $('semStart').value=''; $('semEnd').value=''; $('semCurrent').checked=false; $('formTitle').textContent='Add Semester'; msg(''); }
-function fillForm(id){ const s=rows.find(x=>String(x.id)===String(id)); if(!s) return; $('semId').value=s.id; $('semLabel').value=s.label||''; $('semStart').value=s.start_date||''; $('semEnd').value=s.end_date||''; $('semCurrent').checked=!!s.is_current; $('formTitle').textContent='Edit Semester #'+s.id; window.scrollTo({top:0,behavior:'smooth'}); }
-function render(){
-  $('semBody').innerHTML = rows.length ? rows.map(s=>`<tr>
-    <td class="fw-semibold">${esc(s.label)}</td>
-    <td>${esc(s.start_date||'-')}</td>
-    <td>${esc(s.end_date||'-')}</td>
-    <td>${s.is_current?'<span class="badge bg-success">Current</span>':'<span class="badge bg-secondary">Completed / other</span>'}</td>
-    <td><div class="d-flex gap-1 flex-wrap">
-      <button class="btn btn-outline-primary btn-sm" data-edit="${s.id}">Edit</button>
-      ${s.is_current?'':'<button class="btn btn-outline-success btn-sm" data-current="'+s.id+'">Set current</button>'}
-      <button class="btn btn-outline-danger btn-sm" data-del="${s.id}">Delete</button>
-    </div></td></tr>`).join('') : '<tr><td colspan="5" class="erp-empty">No semesters. Add one to get started.</td></tr>';
-  $('semBody').querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>fillForm(b.getAttribute('data-edit'))));
-  $('semBody').querySelectorAll('[data-current]').forEach(b=>b.addEventListener('click',()=>{ fillForm(b.getAttribute('data-current')); $('semCurrent').checked=true; $('semForm').requestSubmit(); }));
-  $('semBody').querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>delSem(b.getAttribute('data-del'))));
-}
-async function load(){
-  try{
-    const d=await erp.fetchJSON('/api/admin/semesters'); rows=d.semesters||[]; render();
-  }catch(e){ $('semBody').innerHTML='<tr><td colspan="5" class="text-danger small">'+esc(e.message||'Could not load semesters')+'</td></tr>'; }
-}
-async function delSem(id){
-  const s=rows.find(x=>String(x.id)===String(id)); if(!s) return;
-  if(!confirm('Delete semester "'+(s.label||'')+'"? Attendance records are kept.')) return;
-  try{ const d=await erp.fetchJSON('/api/admin/semesters/'+id,{method:'DELETE'}); rows=d.semesters||[]; render(); resetForm(); erp.toast('Semester deleted','success'); }
-  catch(e){ msg(e.message||'Delete failed','text-danger'); }
-}
-$('semForm').addEventListener('submit', async e=>{
-  e.preventDefault(); msg('Saving...');
-  const payload=Object.fromEntries(new FormData(e.target).entries());
-  payload.is_current=$('semCurrent').checked?1:0;
-  try{
-    const d=await erp.fetchJSON('/api/admin/semesters',{method:'POST',body:payload});
-    rows=d.semesters||[]; render(); resetForm(); erp.toast('Semester saved','success');
-  }catch(err){ msg(err.message||'Save failed','text-danger'); }
-});
-$('resetBtn').addEventListener('click',resetForm);
-$('reloadBtn').addEventListener('click',load);
-load();
+(function(){
+  const $=id=>document.getElementById(id);
+  const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const BATCHES={{ (batches if batches is defined else [])|tojson }};
+  let state={batch:null,semesters:[],currentSemNo:null};
+
+  function msg(el,t,c='text-muted'){ el.className='small mt-2 '+c; el.textContent=t||''; }
+  function topMsg(t,c='text-muted'){ const e=$('topMsg'); e.className='small mt-2 '+c; e.textContent=t||''; }
+
+  function fillBatchSelect(){
+    const opts=(BATCHES.length?BATCHES:[{batch_start_year:2024,label:'2024-2028'},{batch_start_year:2023,label:'2023-2027'},{batch_start_year:2025,label:'2025-2029'},{batch_start_year:2026,label:'2026-2030'}]);
+    $('batchSelect').innerHTML=opts.map(b=>`<option value="${b.batch_start_year}">${esc(b.label||b.batch_start_year)}</option>`).join('');
+    state.batch=Number($('batchSelect').value);
+  }
+
+  function statusBadge(s){
+    const st=s.status||(s.sem_no<state.currentSemNo?'completed':s.sem_no==state.currentSemNo?'current':'upcoming');
+    const cls=st==='current'?'bg-success':st==='upcoming'?'bg-warning text-dark':'bg-secondary';
+    return `<span class="badge ${cls}">${esc(st)}</span>`;
+  }
+
+  function render(){
+    const rows=state.semesters||[];
+    $('batchMeta').textContent = state.batch ? `Batch ${state.batch}-${state.batch+4} | Current sem: ${state.currentSemNo||'-'}` : '';
+    $('semBody').innerHTML = rows.length ? rows.map(s=>`
+      <tr class="${Number($('semNo').value)==Number(s.sem_no)?'table-active':''}">
+        <td><strong>${esc(s.sem_no)}</strong></td>
+        <td>${esc(s.label||'')}</td>
+        <td>${esc(s.start_date||'-')}</td>
+        <td>${esc(s.end_date||'-')}</td>
+        <td>${statusBadge(s)}</td>
+        <td class="text-nowrap">
+          <button class="btn btn-outline-primary btn-sm" data-edit-sem="${s.sem_no}" type="button">Edit</button>
+          <button class="btn btn-outline-secondary btn-sm" data-reset-sem="${s.sem_no}" type="button">Reset</button>
+        </td>
+      </tr>`).join('') : '<tr><td colspan="6" class="erp-empty">No semesters.</td></tr>';
+    $('semBody').querySelectorAll('[data-edit-sem]').forEach(b=>b.addEventListener('click',()=>editSem(Number(b.dataset.editSem))));
+    $('semBody').querySelectorAll('[data-reset-sem]').forEach(b=>b.addEventListener('click',()=>resetSem(Number(b.dataset.resetSem))));
+    if(state.currentSemNo) $('rollSem').value=String(state.currentSemNo);
+  }
+
+  function editSem(sn){
+    const s=(state.semesters||[]).find(x=>Number(x.sem_no)==Number(sn)); if(!s) return;
+    $('semNo').value=s.sem_no; $('semLabel').value=s.label||''; $('semStart').value=s.start_date||''; $('semEnd').value=s.end_date||''; msg($('formMsg'),'Editing Sem '+sn); render();
+  }
+
+  async function load(){
+    topMsg('Loading...');
+    try{
+      const d=await erp.fetchJSON('/api/admin/semesters?batch_start_year='+encodeURIComponent(state.batch));
+      state.semesters=d.semesters||[]; state.currentSemNo=d.current_sem_no;
+      if(! $('semNo').value && state.semesters[0]) editSem(state.semesters[0].sem_no);
+      render(); topMsg('Loaded batch semesters.','text-success');
+    }catch(e){ topMsg(e.message||'Load failed','text-danger'); }
+  }
+
+  async function saveSem(e){
+    e.preventDefault(); msg($('formMsg'),'Saving...');
+    try{
+      const body={batch_start_year:state.batch, sem_no:Number($('semNo').value), label:$('semLabel').value, start_date:$('semStart').value, end_date:$('semEnd').value};
+      const d=await erp.fetchJSON('/api/admin/semesters',{method:'POST',body});
+      state.semesters=d.semesters||state.semesters; state.currentSemNo=d.current_sem_no||state.currentSemNo;
+      render(); msg($('formMsg'),'Saved.','text-success'); erp.toast('Semester saved','success');
+    }catch(e){ msg($('formMsg'),e.message||'Save failed','text-danger'); }
+  }
+
+  async function resetSem(sn){
+    if(!confirm('Reset Sem '+sn+' to default dates for this batch?')) return;
+    try{
+      const d=await erp.fetchJSON('/api/admin/semesters/reset_defaults',{method:'POST',body:{batch_start_year:state.batch,sem_no:sn}});
+      state.semesters=d.semesters||[]; state.currentSemNo=d.current_sem_no; render(); if(Number($('semNo').value)==sn) editSem(sn);
+      erp.toast('Semester reset','success');
+    }catch(e){ erp.toast(e.message||'Reset failed','danger'); }
+  }
+
+  async function resetBatch(){
+    if(!confirm('Reset ALL Sem 1-8 default dates for batch '+state.batch+'-'+(state.batch+4)+'?')) return;
+    try{
+      const d=await erp.fetchJSON('/api/admin/semesters/reset_defaults',{method:'POST',body:{batch_start_year:state.batch}});
+      state.semesters=d.semesters||[]; state.currentSemNo=d.current_sem_no; render();
+      if(state.semesters[0]) editSem(Number($('semNo').value)||state.semesters[0].sem_no);
+      erp.toast('Batch defaults reset','success');
+    }catch(e){ erp.toast(e.message||'Reset failed','danger'); }
+  }
+
+  async function previewRollover(){
+    $('rollOut').textContent='Loading preview...';
+    try{
+      const d=await erp.fetchJSON('/api/admin/semesters/rollover/preview',{method:'POST',body:{batch_start_year:state.batch,to_sem_no:Number($('rollSem').value)}});
+      $('rollOut').textContent=JSON.stringify(d,null,2);
+    }catch(e){ $('rollOut').textContent=e.message||'Preview failed'; }
+  }
+
+  async function applyRollover(){
+    if(!confirm('Apply rollover for batch '+state.batch+' to Sem '+$('rollSem').value+'? This updates current class mappings.')) return;
+    $('rollOut').textContent='Applying...';
+    try{
+      const d=await erp.fetchJSON('/api/admin/semesters/rollover/apply',{method:'POST',body:{batch_start_year:state.batch,to_sem_no:Number($('rollSem').value)}});
+      $('rollOut').textContent=JSON.stringify(d,null,2); await load(); erp.toast('Rollover applied','success');
+    }catch(e){ $('rollOut').textContent=e.message||'Apply failed'; erp.toast(e.message||'Apply failed','danger'); }
+  }
+
+  fillBatchSelect();
+  $('batchSelect').addEventListener('change',()=>{ state.batch=Number($('batchSelect').value); $('semNo').value=''; load(); });
+  $('semForm').addEventListener('submit',saveSem);
+  $('resetSemBtn').addEventListener('click',()=>{ const sn=Number($('semNo').value); if(sn) resetSem(sn); });
+  $('resetBatchBtn').addEventListener('click',resetBatch);
+  $('reloadBtn').addEventListener('click',load);
+  $('previewRollBtn').addEventListener('click',previewRollover);
+  $('applyRollBtn').addEventListener('click',applyRollover);
+  load();
+})();
 </script>
 {% endblock %}

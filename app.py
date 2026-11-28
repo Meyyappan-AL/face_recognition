@@ -295,9 +295,15 @@ def canonical_class_name(class_name: str) -> str:
 def is_valid_class_name(class_name: str) -> bool:
     return bool(CLASS_NAME_RE.match(canonical_class_name(class_name)))
 
-def get_classes(include_legacy: bool = False):
-    """Return canonical class names from registry plus any valid DB classes."""
+def get_classes(include_legacy: bool = False, include_cohorts: bool = True):
+    """Return canonical class names from registry, active cohort current classes, and valid DB classes."""
     classes = list(CLASS_REGISTRY)
+    if include_cohorts:
+        try:
+            for r in cohort_rows(active_only=True):
+                cn=canonical_class_name(r.get('current_class_name'))
+                if cn and cn not in classes: classes.append(cn)
+        except Exception: pass
     try:
         conn = _db(); c = conn.cursor()
         c.execute("SELECT DISTINCT class FROM students WHERE class IS NOT NULL AND TRIM(class)!='' ORDER BY class")
@@ -317,9 +323,12 @@ def get_classes(include_legacy: bool = False):
                         classes.append(n)
         except Exception:
             pass
-    valid = sorted([x for x in classes if is_valid_class_name(x)])
-    extras = sorted([x for x in classes if not is_valid_class_name(x)])
-    return valid + extras
+    valid = sorted(set([x for x in classes if is_valid_class_name(x)]))
+    def _k(x):
+        info=parse_cohort_class(x)
+        if info: return (0,info['batch_start_year'],info['sem_no'],info['section'],x)
+        return (1,9999,99,x,x)
+    return sorted(valid, key=_k)
 
 def _timetable_version_row(class_name, on_date=None):
     """Return the effective timetable version for a class/date, if one exists."""
@@ -851,9 +860,10 @@ def ensure_class_cohorts_seed():
                          ON CONFLICT(cohort_key) DO UPDATE SET
                            batch_start_year=excluded.batch_start_year,
                            section=excluded.section,
+                           current_sem_no=CASE WHEN COALESCE(class_cohorts.current_sem_no,0)=0 THEN excluded.current_sem_no ELSE class_cohorts.current_sem_no END,
+                           current_class_name=CASE WHEN COALESCE(class_cohorts.current_class_name,'')='' THEN excluded.current_class_name ELSE class_cohorts.current_class_name END,
                            updated_at=excluded.updated_at""",
                       (ck,by,sec,cur_sem,cur_name,now,now))
-            # if cohort exists, keep its current_sem_no/current_class_name if already set; but ensure current sem row exists
             try: ensure_batch_semesters(by, actor='migration')
             except Exception: pass
         conn.commit()
@@ -907,6 +917,101 @@ def migrate_semester_ids_best_effort():
         except Exception: pass
     finally:
         conn.close()
+
+init_db(); seed_defaults(); ensure_semester_seed(); seed_timetable_versions(); ensure_class_cohorts_seed(); migrate_semester_ids_best_effort()
+
+def cohort_rows(batch_start_year=None, active_only=True):
+    conn=_db(); c=conn.cursor(); rows=[]
+    try:
+        q="SELECT id,cohort_key,batch_start_year,section,current_sem_no,current_class_name,active,created_at,updated_at FROM class_cohorts WHERE 1=1"
+        params=[]
+        if batch_start_year is not None:
+            q+=" AND batch_start_year=?"; params.append(int(batch_start_year))
+        if active_only:
+            q+=" AND COALESCE(active,1)=1"
+        q+=" ORDER BY batch_start_year DESC, section ASC, id ASC"
+        c.execute(q,params); rows=c.fetchall()
+    except Exception:
+        rows=[]
+    finally:
+        conn.close()
+    keys=['id','cohort_key','batch_start_year','section','current_sem_no','current_class_name','active','created_at','updated_at']
+    out=[]
+    for r in rows:
+        d=dict(zip(keys,r))
+        d['active']=int(d.get('active') or 0)
+        d['batch_label']=batch_label(d.get('batch_start_year'))
+        out.append(d)
+    return out
+
+def _rollover_targets(batch_start_year, to_sem_no=None):
+    by=int(batch_start_year)
+    to_sem=_normalize_sem_no(to_sem_no) if to_sem_no not in (None,'') else (current_sem_for_batch(by) or 1)
+    ensure_batch_semesters(by, actor=session.get('username') if session else 'system')
+    rows=cohort_rows(batch_start_year=by, active_only=True)
+    targets=[]
+    for r in rows:
+        frm=_normalize_sem_no(r.get('current_sem_no')) or current_sem_for_batch(by)
+        sec=_norm(r.get('section')).upper() or 'A'
+        from_class=r.get('current_class_name') or class_name_for_cohort(by,frm,sec)
+        to_class=class_name_for_cohort(by,to_sem,sec)
+        targets.append({**r,'from_sem_no':frm,'to_sem_no':to_sem,'from_class':from_class,'to_class':to_class,'cohort_key':r.get('cohort_key') or cohort_key_for(by,sec)})
+    return to_sem, targets
+
+def _rollover_preview(batch_start_year, to_sem_no=None):
+    to_sem, targets=_rollover_targets(batch_start_year, to_sem_no)
+    conn=_db(); c=conn.cursor()
+    preview=[]
+    try:
+        for t in targets:
+            frm=t['from_class']; to=t['to_class']
+            c.execute("SELECT COUNT(*) FROM students WHERE upper(class)=upper(?)",(frm,))
+            students=int(c.fetchone()[0] or 0)
+            c.execute("SELECT COUNT(*) FROM users WHERE role IN ('staff','hod','admin') AND upper(advisor_class)=upper(?)",(frm,))
+            advisors=int(c.fetchone()[0] or 0)
+            c.execute("SELECT COUNT(*) FROM timetable_versions WHERE upper(class_name)=upper(?)",(frm,))
+            tt_versions=int(c.fetchone()[0] or 0)
+            tt_file=os.path.exists(os.path.join(TIMETABLE_DIR,f"{frm}.json"))
+            preview.append({**t,'students':students,'advisor_users':advisors,'timetable_versions':tt_versions,'timetable_file':tt_file,'will_change':frm!=to})
+    finally:
+        conn.close()
+    return {'ok':True,'batch_start_year':int(batch_start_year),'batch_label':batch_label(batch_start_year),'to_sem_no':to_sem,'targets':preview,
+            'note':'Rollover updates current-state class mappings only (students/advisor/cohort/current timetable mirror). Historical records keep stored class names.'}
+
+def apply_batch_rollover(batch_start_year, to_sem_no=None, actor='admin'):
+    preview=_rollover_preview(batch_start_year, to_sem_no)
+    to_sem=preview['to_sem_no']; by=int(batch_start_year)
+    now=_now_iso(); changed=[]
+    conn=_db(); c=conn.cursor()
+    try:
+        for t in preview['targets']:
+            frm=t['from_class']; to=t['to_class']; ck=t['cohort_key']; sec=t['section']
+            if frm==to:
+                changed.append({**t,'status':'unchanged'}); continue
+            c.execute("UPDATE students SET class=?, study_year=? WHERE upper(class)=upper(?)", (to, (to_sem+1)//2, frm))
+            students=c.rowcount
+            c.execute("UPDATE users SET advisor_class=? WHERE role IN ('staff','hod','admin') AND upper(advisor_class)=upper(?)", (to, frm))
+            advisors=c.rowcount
+            # keep timetable_versions historical class_name unchanged; only update cohort/current mirror and optional timetable json file copy
+            src=os.path.join(TIMETABLE_DIR,f"{frm}.json"); dst=os.path.join(TIMETABLE_DIR,f"{to}.json")
+            file_copied=False
+            try:
+                if os.path.exists(src) and not os.path.exists(dst):
+                    shutil.copy2(src,dst); file_copied=True
+            except Exception:
+                file_copied=False
+            c.execute("""INSERT INTO class_cohorts(cohort_key,batch_start_year,section,current_sem_no,current_class_name,active,created_at,updated_at)
+                         VALUES (?,?,?,?,?,1,?,?)
+                         ON CONFLICT(cohort_key) DO UPDATE SET current_sem_no=excluded.current_sem_no,current_class_name=excluded.current_class_name,active=1,updated_at=excluded.updated_at""",
+                      (ck,by,sec,to_sem,to,now,now))
+            changed.append({**t,'status':'updated','students_updated':int(students or 0),'advisor_users_updated':int(advisors or 0),'timetable_file_copied':file_copied})
+        conn.commit()
+    except Exception:
+        conn.rollback(); raise
+    finally:
+        conn.close()
+    audit_log('class_cohorts',str(by),'rollover',None,{'batch_start_year':by,'to_sem_no':to_sem,'changes':changed},details='Admin applied batch rollover')
+    return {'ok':True,'batch_start_year':by,'batch_label':batch_label(by),'to_sem_no':to_sem,'changes':changed,'note':preview['note']}
 
 init_db(); seed_defaults(); ensure_semester_seed(); seed_timetable_versions(); ensure_class_cohorts_seed(); migrate_semester_ids_best_effort()
 
@@ -4996,7 +5101,8 @@ def _start_absence_worker():
 @app.route('/admin/semesters')
 @admin_required
 def admin_semesters_page():
-    return render_template('admin_semesters.html', user=_current_user())
+    batches=[{'batch_start_year':by,'label':batch_label(by)} for by in BATCH_START_YEARS]
+    return render_template('admin_semesters.html', user=_current_user(), batches=batches)
 
 @app.route('/api/semesters')
 @login_required
@@ -5153,6 +5259,26 @@ def api_admin_semesters_delete(sid):
     _sync_current_semester_settings()
     audit_log('semesters',str(sid),'delete',None,None,details='Admin deleted legacy semester')
     return jsonify({'ok':True,'semesters':[ _semester_json(s) for s in _semester_rows() ]})
+
+@app.route('/api/admin/semesters/rollover/preview', methods=['POST'])
+@admin_required
+def api_admin_semesters_rollover_preview():
+    data=request.get_json(silent=True) or {}
+    try: by=int(data.get('batch_start_year'))
+    except Exception: return jsonify({'ok':False,'error':'batch_start_year required'}),400
+    to_sem=data.get('to_sem_no')
+    return jsonify(_rollover_preview(by,to_sem))
+
+@app.route('/api/admin/semesters/rollover/apply', methods=['POST'])
+@admin_required
+def api_admin_semesters_rollover_apply():
+    data=request.get_json(silent=True) or {}
+    try: by=int(data.get('batch_start_year'))
+    except Exception: return jsonify({'ok':False,'error':'batch_start_year required'}),400
+    to_sem=data.get('to_sem_no')
+    actor=session.get('display_name') or session.get('username') or 'admin'
+    res=apply_batch_rollover(by,to_sem,actor=actor)
+    return jsonify(res)
 
 @app.route('/admin/calendar')
 @admin_required
