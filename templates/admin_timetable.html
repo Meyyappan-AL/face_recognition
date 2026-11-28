@@ -639,18 +639,26 @@
     try{
       const d=await erp.fetchJSON('/api/admin/timetable/import/preview',{method:'POST',body:{class:$('classSelect').value,batch_start_year:state.batch,sem_no:state.semNo,text:$('importText').value}});
       state._importPreview=d; state._importText=$('importText').value;
-      $('importResult').textContent=`Preview OK for ${d.class}. Staff: ${d.staff_count}. Warnings: ${(d.warnings||[]).length}\n` + (d.warnings||[]).join('\n');
-      if(d.data){ state.data=d.data; state.class=d.class; renderEditor(); setDirty(true); msg('Import preview loaded into editor. Review then Apply.','success'); }
+      const selected=$('classSelect').value;
+      if(d.class && selected && d.class!==selected){
+        $('importResult').textContent=`Preview parsed class ${d.class}, but selected class is ${selected}. Select the correct class or fix CLASS line in import text.\n` + (d.warnings||[]).join('\n');
+        msg(`Import class ${d.class} does not match selected ${selected}. Not loaded.`,'danger');
+        return;
+      }
+      $('importResult').textContent=`Preview OK for ${d.class||selected}. Staff: ${d.staff_count}. Warnings: ${(d.warnings||[]).length}\n` + (d.warnings||[]).join('\n');
+      if(d.data){ state.data=d.data; state.class=d.class||selected; $('classSelect').value=state.class; renderEditor(); setDirty(true); msg('Import preview loaded for '+state.class+'. Review then Apply.','success'); }
     }catch(e){ const data=e.data||{}; $('importResult').textContent=(data.errors||[e.message]).join('\n'); msg(e.message||'Import preview failed','danger'); }
   }
   async function applyImport(){
-    if(!confirm('Apply import as a NEW timetable version and sync staff?')) return;
+    const selectedClass=$('classSelect').value;
+    if(!confirm(`Apply import as a NEW timetable version for ${selectedClass} and sync staff?`)) return;
     $('importResult').textContent='Applying...';
     try{
-      const d=await erp.fetchJSON('/api/admin/timetable/import/apply',{method:'POST',body:{class:$('classSelect').value,batch_start_year:state.batch,sem_no:state.semNo,effective_from:$('effectiveFrom').value,text:$('importText').value,notes:'Imported timetable'}});
-      await loadVersions(d.class||$('classSelect').value,state.batch,state.semNo); if(d.version_id) await loadVersion(d.version_id);
-      $('importResult').textContent=`Imported ${d.class} v${d.version_no}. Staff sync: ${JSON.stringify(d.staff_sync||{})}`;
-      erp.toast('Timetable imported as new version','success');
+      const d=await erp.fetchJSON('/api/admin/timetable/import/apply',{method:'POST',body:{class:selectedClass,batch_start_year:state.batch,sem_no:state.semNo,effective_from:$('effectiveFrom').value,text:$('importText').value,notes:'Imported timetable'}});
+      const cls=d.class||selectedClass;
+      await loadVersions(cls,state.batch,state.semNo); if(d.version_id) await loadVersion(d.version_id);
+      $('importResult').textContent=`Imported ${cls} v${d.version_no}. Staff sync: ${JSON.stringify(d.staff_sync||{})}`;
+      erp.toast('Timetable imported for '+cls,'success');
     }catch(e){ const data=e.data||{}; $('importResult').textContent=(data.errors||[e.message]).join('\n'); msg(e.message||'Import failed','danger'); }
   }
   $('previewImportBtn').addEventListener('click',previewImport);
