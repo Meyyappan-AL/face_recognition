@@ -111,11 +111,16 @@
   function setDirty(v){ dirty=v; $('dirty').innerHTML=v?'<span class="badge bg-warning text-dark">Unsaved changes</span>':'<span class="badge bg-success">Loaded</span> '+esc(currentClass)+' '+esc(currentVersion?('v'+currentVersion.version_no):'legacy'); $('saveBtn').disabled=!students.length||!currentVersion; $('carryBtn').disabled=!currentVersion; if(v) $('saveBtn').disabled=!currentVersion; }
   function key(s){ return s.slot_key; }
   function studentLabel(s){ return `${erp.repBadge(s.student_role)}${s.name||'-'}${s.reg_no?' · '+s.reg_no:''}`; }
+  function currentBatch(){ return $('batch').value?Number($('batch').value):null; }
   function currentSem(){ return $('sem').value?Number($('sem').value):null; }
 
   function fillSemesters(){
+    // keep all sem 1-8 selectable; electives are sem 5-8 but selector should show all
+    const opts=[]; for(let i=1;i<=8;i++) opts.push(`<option value="${i}">Sem ${i}</option>`);
+    $('sem').innerHTML=opts.join('');
     const cur=(INIT_SEMS.find(s=>Number(s.is_current)===1)||INIT_SEMS[0]||{});
-    $('sem').innerHTML=INIT_SEMS.map(s=>`<option value="${Number(s.id)}" ${Number(s.id)===Number(cur.id)?'selected':''}>${esc(s.label||('Semester '+s.id))}</option>`).join('')||'<option value="">All semesters</option>';
+    const curNo=Number(cur.sem_no||cur.id||5);
+    if(curNo>=1&&curNo<=8) $('sem').value=String(curNo);
   }
 
   function fillVersions(){
