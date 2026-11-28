@@ -448,17 +448,23 @@
     msg('Loaded legacy JSON. Save a version to start version history.','warning');
   }
 
+  function emptyTimetable(cls){
+    return {class:cls||'',hall:'',class_advisor:{name:'',initials:'',is_hod:false},slots:[{period:1,label:'Hour 1',start:'09:00',end:'09:45'},{period:2,label:'Hour 2',start:'09:45',end:'10:35'},{period:3,label:'Hour 3',start:'10:50',end:'11:40'},{period:4,label:'Hour 4',start:'11:40',end:'12:30'},{period:5,label:'Hour 5',start:'13:20',end:'14:15'},{period:6,label:'Hour 6',start:'14:15',end:'15:10'},{period:7,label:'Hour 7',start:'15:20',end:'16:15'}],breaks:[{after_period:2,start:'10:35',end:'10:50'},{after_period:6,start:'15:10',end:'15:20'}],lunch:{start:'12:30',end:'13:20'},schedule:{MON:[],TUE:[],WED:[],THU:[],FRI:[],SAT:[]},staff_directory:{}};
+  }
   async function loadClass(cls){
     if(!cls){ state.data=null; renderEditor(); return; }
     if(state.dirty && !confirm('Discard unsaved changes and load '+cls+'?')){ $('classSelect').value=state.class; return; }
     state.class=cls; state.versionId=null; state.batch=currentBatch(); state.semNo=currentSemNo(); state.semesterId=null;
-    $('classSelect').value=cls; msg('Loading '+cls+'...');
+    state.data=emptyTimetable(cls); state.referencePath=''; state.referenceName=''; state.referenceUrl=''; state.notes=''; state.dirty=false;
+    $('classSelect').value=cls; renderEditor(); msg('Loading '+cls+'...');
     try{
       clearLists();
       await loadVersions(cls,state.batch,state.semNo);
       const pick=state.versions.find(v=>v.status==='current')||state.versions[0];
-      if(pick) await loadVersion(pick.id); else await loadLegacy(cls);
-    }catch(e){ msg(e.message||'Could not load timetable.','danger'); erp.toast(e.message||'Load failed','danger'); }
+      if(pick){ await loadVersion(pick.id); return; }
+      try{ await loadLegacy(cls); }
+      catch(le){ state.data=emptyTimetable(cls); state.versionId=null; state.dirty=false; renderEditor(); msg('No timetable version for '+cls+' in selected batch/sem. Create or import one.','warning'); }
+    }catch(e){ state.data=emptyTimetable(cls); state.versionId=null; state.dirty=false; renderEditor(); msg(e.message||'Could not load timetable.','danger'); erp.toast(e.message||'Load failed','danger'); }
   }
 
   async function validateData(){
