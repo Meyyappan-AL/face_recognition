@@ -241,6 +241,7 @@
 
   function populateClasses(){
     const sel=$('classSelect'); const current=state.class||sel.value;
+    classList.sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'}));
     sel.innerHTML=classList.map(c=>`<option value="${attr(c)}">${esc(c)}</option>`).join('') || '<option value="">No classes</option>';
     if(current && classList.includes(current)) sel.value=current;
   }
@@ -384,7 +385,8 @@
   function renderHistory(){
     if(!state.versions.length){ $('versionRows').innerHTML='<tr><td colspan="7" class="text-muted">No versions for this class/semester. Save one to start version history.</td></tr>'; return; }
     const map={current:'bg-success',future:'bg-info text-dark',past:'bg-secondary'};
-    $('versionRows').innerHTML=state.versions.map(v=>`
+    const vers=[...state.versions].sort((a,b)=>(Number(a.version_no)||0)-(Number(b.version_no)||0));
+    $('versionRows').innerHTML=vers.map(v=>`
       <tr class="${Number(v.id)===Number(state.versionId)?'table-active':''}">
         <td>v${esc(v.version_no)}</td>
         <td>${esc(v.effective_from)}${v.effective_to?' → '+esc(v.effective_to):' → open'}</td>
@@ -695,6 +697,7 @@
       if(Array.isArray(d.classes) && d.classes.length) classes=d.classes;
     }catch(e){ console.warn('timetables list failed',e); }
     classList=Array.from(new Set((classes||[]).filter(Boolean)));
+    classList.sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'}));
     $('classChips').innerHTML=classList.length?classList.map(c=>`<span class="tt-chip">${esc(c)}</span>`).join(''):'<span class="text-muted">No classes yet.</span>';
     populateClasses();
     const params=new URLSearchParams(window.location.search||'');

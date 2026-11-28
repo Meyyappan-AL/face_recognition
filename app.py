@@ -1698,9 +1698,11 @@ def _timetable_path(class_name):
     return os.path.join(TIMETABLE_DIR, f'{cls}.json')
 
 def _timetable_version_status(row, today=None):
-    today=today or datetime.date.today().isoformat()
+    today=today or _today_ist_str()
     ef=(row.get('effective_from') or '').strip()
     et=(row.get('effective_to') or '').strip()
+    if int(row.get('is_active') or 0)==1 and (not ef or ef<=today) and (not et or et>=today):
+        return 'current'
     if ef and ef>today: return 'future'
     if et and et<today: return 'past'
     return 'current'
@@ -1736,7 +1738,7 @@ def _timetable_version_rows(class_name=None, semester_id=None, include_hidden=Fa
             q+=" AND semester_id=?"; params.append(int(semester_id))
         if not include_hidden:
             q+=" AND COALESCE(hidden,0)=0"
-        q+=" ORDER BY effective_from DESC, version_no DESC, id DESC"
+        q+=" ORDER BY version_no ASC, effective_from ASC, id ASC"
         c.execute(q,params); rows=c.fetchall()
     except Exception:
         rows=[]
@@ -1793,47 +1795,22 @@ def _save_timetable_version(class_name, semester_id, effective_from, payload,
         latest=c.fetchone()
         action='create' if force_new else ('update' if latest and eff==str(latest[2] or '') else 'create')
         if action=='update':
-            version_id=latest[0]
-            c.execute("""UPDATE timetable_versions
-                         SET timetable_json=?, reference_path=COALESCE(NULLIF(?,''),reference_path),
-                             reference_name=COALESCE(NULLIF(?,''),reference_name), notes=?,
-                             is_active=1, updated_at=?
-                         WHERE id=?""",
+            version_id=int(latest[0])
+            c.execute("UPDATE timetable_versions SET timetable_json=?, reference_path=COALESCE(NULLIF(?,''),reference_path), reference_name=COALESCE(NULLIF(?,''),reference_name), notes=?, is_active=1, updated_at=? WHERE id=?",
                       (json.dumps(payload,ensure_ascii=False),ref_path,ref_name,(notes or '').strip(),now,version_id))
-            c.execute("UPDATE timetable_versions SET is_active=0 WHERE upper(class_name)=upper(?) AND semester_id=? AND id<>?",
-                      (cls,semester_id,version_id))
-            c.execute("UPDATE timetable_versions SET is_active=1 WHERE id=?",(version_id,))
             version_no=int(latest[1] or 1)
-            effective_to=(latest[3] or '').strip() or sem_end or None
         else:
-            c.execute("""SELECT COALESCE(MAX(version_no),0) FROM timetable_versions
-                         WHERE upper(class_name)=upper(?) AND semester_id=?""",(cls,semester_id))
+            c.execute("SELECT COALESCE(MAX(version_no),0) FROM timetable_versions WHERE upper(class_name)=upper(?) AND semester_id=?", (cls,semester_id))
             version_no=int(c.fetchone()[0] or 0)+1
-            if latest:
-                prev_day=(eff_d-datetime.timedelta(days=1)).isoformat()
-                c.execute("UPDATE timetable_versions SET effective_to=?,is_active=0 WHERE id=?",(prev_day,latest[0]))
-            c.execute("""UPDATE timetable_versions SET effective_to=?,is_active=0
-                         WHERE upper(class_name)=upper(?) AND semester_id=? AND effective_from<?
-                           AND (effective_to IS NULL OR effective_to='' OR effective_to>=?)""",
-                      ((eff_d-datetime.timedelta(days=1)).isoformat(),cls,semester_id,eff,eff))
-            c.execute("""SELECT effective_from FROM timetable_versions
-                         WHERE upper(class_name)=upper(?) AND semester_id=? AND effective_from>?
-                         ORDER BY effective_from ASC LIMIT 1""",(cls,semester_id,eff))
-            nxt=c.fetchone()
-            if nxt and nxt[0]:
-                try: effective_to=(datetime.date.fromisoformat(nxt[0])-datetime.timedelta(days=1)).isoformat()
-                except Exception: effective_to=sem_end or None
-            else:
-                effective_to=sem_end or None
-            c.execute("UPDATE timetable_versions SET is_active=0 WHERE upper(class_name)=upper(?) AND semester_id=?",
-                      (cls,semester_id))
-            c.execute("""INSERT INTO timetable_versions
-                         (class_name,semester_id,version_no,effective_from,effective_to,timetable_json,
-                          reference_path,reference_name,is_active,created_by,created_at,updated_at,notes)
-                         VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)""",
-                      (class_name,semester_id,version_no,eff,effective_to,json.dumps(payload,ensure_ascii=False),
-                       ref_path or None,ref_name or None,who,now,now,(notes or '').strip()))
-            version_id=c.lastrowid
+            c.execute("INSERT INTO timetable_versions (class_name,semester_id,version_no,effective_from,effective_to,timetable_json,reference_path,reference_name,is_active,created_by,created_at,updated_at,notes) VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)",
+                      (cls,semester_id,version_no,eff,sem_end or None,json.dumps(payload,ensure_ascii=False), ref_path or None,ref_name or None,who,now,now,(notes or '').strip()))
+            version_id=int(c.lastrowid)
+        # make selected version current; older versions become past; no future status for simple history
+        prev_day=(eff_d-datetime.timedelta(days=1)).isoformat()
+        c.execute("UPDATE timetable_versions SET is_active=CASE WHEN id=? THEN 1 ELSE 0 END, updated_at=? WHERE upper(class_name)=upper(?) AND semester_id=?", (version_id,now,cls,semester_id))
+        c.execute("UPDATE timetable_versions SET effective_to=? WHERE upper(class_name)=upper(?) AND semester_id=? AND id<>? AND (effective_to IS NULL OR effective_to='' OR effective_to>=?)", (prev_day,cls,semester_id,version_id,eff))
+        c.execute("UPDATE timetable_versions SET effective_from=?, effective_to=? WHERE id=?", (eff, sem_end or None, version_id))
+        effective_to=sem_end or None
         _write_timetable_json_file(class_name,payload)
         conn.commit()
         return {'ok':True,'action':action,'version_id':version_id,'version_no':version_no,
@@ -2138,11 +2115,21 @@ def api_admin_timetable_version_delete(version_id):
         c.execute("DELETE FROM timetable_versions WHERE id=?", (vid,))
         next_id=None
         if sem_id is not None:
-            c.execute("SELECT id FROM timetable_versions WHERE upper(class_name)=upper(?) AND semester_id=? ORDER BY effective_from DESC, version_no DESC, id DESC LIMIT 1", (cls, sem_id))
+            c.execute("SELECT id FROM timetable_versions WHERE upper(class_name)=upper(?) AND semester_id=? ORDER BY version_no ASC, id ASC", (cls, sem_id))
+            rows=c.fetchall(); ids=[int(r[0]) for r in rows]
+            # renumber sequentially to keep v1..vn contiguous
+            for i,old_id in enumerate(ids, start=1):
+                c.execute("UPDATE timetable_versions SET version_no=?, updated_at=? WHERE id=?", (i, _now_iso(), old_id))
+            c.execute("SELECT id FROM timetable_versions WHERE upper(class_name)=upper(?) AND semester_id=? ORDER BY version_no DESC, id DESC LIMIT 1", (cls, sem_id))
             nr=c.fetchone(); next_id=int(nr[0]) if nr else None
             c.execute("UPDATE timetable_versions SET is_active=0 WHERE upper(class_name)=upper(?) AND semester_id=?", (cls, sem_id))
             if next_id is not None:
-                c.execute("UPDATE timetable_versions SET is_active=1 WHERE id=?", (next_id,))
+                sem_obj=_semester_by_id(sem_id) if sem_id else None
+                sem_end=((sem_obj or {}).get('end_date') or '').strip() or None
+                eff=_today_ist_str()
+                prev_day=(datetime.date.fromisoformat(eff)-datetime.timedelta(days=1)).isoformat()
+                c.execute("UPDATE timetable_versions SET is_active=1, effective_from=?, effective_to=?, updated_at=? WHERE id=?", (eff, sem_end, _now_iso(), next_id))
+                c.execute("UPDATE timetable_versions SET effective_to=? WHERE upper(class_name)=upper(?) AND semester_id=? AND id<>? AND (effective_to IS NULL OR effective_to='' OR effective_to>=?)", (prev_day, cls, sem_id, next_id, eff))
         conn.commit(); conn.close()
         if ref_path:
             try:
