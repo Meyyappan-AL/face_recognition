@@ -883,16 +883,10 @@ def migrate_semester_ids_best_effort():
             info=parse_cohort_class(cls)
             if not info: continue
             by=info['batch_start_year']
-            sem=None
-            if sem_id:
-                old=_semester_by_id(sem_id)
-                if old and old.get('batch_start_year')==by and old.get('sem_no'):
-                    sem=old
-            if not sem:
-                sn=current_sem_for_batch(by,on_date=eff or datetime.date.today().isoformat())
-                sem=get_or_create_batch_semester(by,sn,actor='migration')
-            if sem and sem.get('id') and int(sem.get('id'))!=int(sem_id or 0):
-                c.execute("UPDATE timetable_versions SET semester_id=? WHERE id=?", (int(sem['id']), vid))
+            desired_sem_no=int(info.get('sem_no') or 0) or int(current_sem_for_batch(by,on_date=eff or datetime.date.today().isoformat()))
+            target=get_or_create_batch_semester(by,desired_sem_no,actor='migration')
+            if target and target.get('id') and int(target.get('id'))!=int(sem_id or 0):
+                c.execute("UPDATE timetable_versions SET semester_id=? WHERE id=?", (int(target['id']), vid))
         # medical_requests: prefer class_name batch, fallback to student's current class
         c.execute("SELECT id,class_name,student_id,semester_id,from_date FROM medical_requests")
         for rid, cls, sid, sem_id, from_date in c.fetchall():
