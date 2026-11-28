@@ -1870,7 +1870,10 @@ def _resolve_batch_sem_from_request(data=None, args=None):
 @admin_required
 def admin_timetable_page():
     batches=[{'batch_start_year':by,'label':batch_label(by)} for by in BATCH_START_YEARS]
-    return render_template('admin_timetable.html', classes=get_classes(), batches=batches, today=_today_ist_str())
+    resp=make_response(render_template('admin_timetable.html', classes=get_classes(), batches=batches, today=_today_ist_str()))
+    resp.headers['Cache-Control']='no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma']='no-cache'
+    return resp
 
 @app.route('/api/admin/timetables')
 @admin_required
