@@ -244,10 +244,8 @@
     sel.innerHTML=classList.map(c=>`<option value="${attr(c)}">${esc(c)}</option>`).join('') || '<option value="">No classes</option>';
     if(current && classList.includes(current)) sel.value=current;
   }
-  function currentSemesterId(){
-    const raw=$('semesterSelect').value;
-    return raw?Number(raw):(INIT_SEMS.find(s=>s.is_current)||{}).id||null;
-  }
+  function currentBatch(){ return $('batchSelect').value || ''; }
+  function currentSemNo(){ return $('semSelect').value || ''; }
 
   function defaultSlots(){
     return Array.from({length:7},(_,i)=>({period:i+1,label:'Hour '+(i+1),start:'',end:''}));
