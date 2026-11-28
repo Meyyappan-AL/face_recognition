@@ -6901,7 +6901,7 @@ def api_admin_settings():
         vals['attendance_cutoff_hour']=str(get_setting('attendance_cutoff_hour', ATTENDANCE_CUTOFF_HOUR))
         sem=_current_semester() or {}
         groups=[
-            {'title':'Academic & semester','description':'Mirrors the current semester. Use Semester Management for multiple semesters.','fields':['semester_label','semester_start','semester_end']},
+            {'title':'Academic & semester','description':'Batch-relative S1-S8 semesters are managed in Semester Management. These legacy settings remain for compatibility only.','fields':['semester_label','semester_start','semester_end']},
             {'title':'Attendance policy','description':'Controls defaulter reporting and the staff marking window.','fields':['defaulter_threshold','attendance_start_hour','attendance_cutoff_hour','attendance_window_days']},
             {'title':'Calendar enforcement','description':'Choose whether calendar holidays block staff submissions.','fields':['enforce_calendar_holidays']},
         ]
@@ -6911,7 +6911,7 @@ def api_admin_settings():
                   'attendance_start_hour':vals['attendance_start_hour'],
                   'attendance_cutoff_hour':vals['attendance_cutoff_hour'],
                   'attendance_window_days':vals['attendance_window_days'],
-                  'hod_correction_note':'HOD/Admin may correct until the semester end date; future dates stay closed.'}
+                  'hod_correction_note':'HOD/Admin may correct until the semester end date; future dates stay closed. Batch-sem dates are managed in Semester Management.'}
         return jsonify({'ok':True,'settings':vals,'groups':groups,'runtime':runtime})
     data=request.get_json(silent=True) or request.form.to_dict()
     who=session.get('display_name') or session.get('username')
