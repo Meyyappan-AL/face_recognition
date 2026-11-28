@@ -28,10 +28,14 @@
             <select id="classSelect" class="form-select form-select-sm" style="min-width:140px"></select>
           </div>
           <div>
-            <label class="form-label small mb-1" for="semesterSelect">Semester</label>
-            <select id="semesterSelect" class="form-select form-select-sm" style="min-width:160px">
-              {% for s in semesters %}<option value="{{ s.id }}" {% if s.is_current %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+            <label class="form-label small mb-1" for="batchSelect">Batch</label>
+            <select id="batchSelect" class="form-select form-select-sm" style="min-width:150px">
+              {% for b in batches %}<option value="{{ b.batch_start_year }}">{{ b.label }}</option>{% endfor %}
             </select>
+          </div>
+          <div>
+            <label class="form-label small mb-1" for="semSelect">Sem</label>
+            <select id="semSelect" class="form-select form-select-sm" style="min-width:110px">{% for n in range(1,9) %}<option value="{{n}}">Sem {{n}}</option>{% endfor %}</select>
           </div>
           <div>
             <label class="form-label small mb-1" for="effectiveFrom">Effective from</label>
@@ -206,9 +210,9 @@
   const $=id=>document.getElementById(id);
   const DAY_KEYS=['MON','TUE','WED','THU','FRI','SAT'];
   const INIT_CLASSES={{ classes|tojson }};
-  const INIT_SEMS={{ semesters|tojson }};
+  const BATCHES={{ batches|tojson }};
   const TODAY={{ today|tojson }};
-  const state={class:'',semesterId:null,data:null,versionId:null,versions:[],
+  const state={class:'',batch:null,semNo:null,semesterId:null,data:null,versionId:null,versions:[],
                referencePath:'',referenceName:'',referenceUrl:'',notes:'',dirty:false,today:TODAY};
   let classList=INIT_CLASSES.slice();
 
@@ -413,8 +417,9 @@
     if(!$('rawWrap').classList.contains('d-none')) $('rawText').value=JSON.stringify(collectData(),null,2);
   }
 
-  async function loadVersions(cls,semId){
-    const d=await erp.fetchJSON(`/api/admin/timetable/versions?class=${encodeURIComponent(cls)}&semester_id=${encodeURIComponent(semId||'')}`);
+  async function loadVersions(cls,batch,semNo){
+    const d=await erp.fetchJSON(`/api/admin/timetable/versions?class=${encodeURIComponent(cls)}&batch_start_year=${encodeURIComponent(batch||'')}&sem_no=${encodeURIComponent(semNo||'')}`);
+    state.semesterId=d.semester_id||state.semesterId;
     state.versions=d.versions||[];
     renderHistory();
     return state.versions;
@@ -446,11 +451,11 @@
   async function loadClass(cls){
     if(!cls){ state.data=null; renderEditor(); return; }
     if(state.dirty && !confirm('Discard unsaved changes and load '+cls+'?')){ $('classSelect').value=state.class; return; }
-    state.class=cls; state.versionId=null; state.semesterId=currentSemesterId();
+    state.class=cls; state.versionId=null; state.batch=currentBatch(); state.semNo=currentSemNo(); state.semesterId=null;
     $('classSelect').value=cls; msg('Loading '+cls+'...');
     try{
       clearLists();
-      await loadVersions(cls,state.semesterId);
+      await loadVersions(cls,state.batch,state.semNo);
       const pick=state.versions.find(v=>v.status==='current')||state.versions[0];
       if(pick) await loadVersion(pick.id); else await loadLegacy(cls);
     }catch(e){ msg(e.message||'Could not load timetable.','danger'); erp.toast(e.message||'Load failed','danger'); }
@@ -482,11 +487,11 @@
     try{
       const data=collectData();
       const d=await erp.fetchJSON('/api/admin/timetable/versions',{method:'POST',body:{
-        class:state.class,semester_id:state.semesterId,effective_from:$('effectiveFrom').value,
+        class:state.class,batch_start_year:state.batch,sem_no:state.semNo,effective_from:$('effectiveFrom').value,
         data:data,reference_path:state.referencePath,reference_name:state.referenceName,
         notes:$('versionNotes').value
       }});
-      await loadVersions(state.class,state.semesterId);
+      await loadVersions(state.class,state.batch,state.semNo);
       await loadVersion(d.version_id);
       if(d.warnings&&d.warnings.length) showList('warnBox','Saved with warnings',d.warnings,'alert-warning');
       msg('Saved version v'+d.version_no+' for '+state.class+'. Staff sync: '+JSON.stringify(d.staff_sync||{}),'success');
@@ -503,9 +508,9 @@
     if(!confirm(`Restore v${v.version_no} as a new version effective ${$('effectiveFrom').value}?`)) return;
     try{
       const d=await erp.fetchJSON('/api/admin/timetable/versions/'+encodeURIComponent(id)+'/restore',{method:'POST',body:{
-        effective_from:$('effectiveFrom').value,semester_id:state.semesterId,notes:'Restored v'+v.version_no
+        effective_from:$('effectiveFrom').value,batch_start_year:state.batch,sem_no:state.semNo,notes:'Restored v'+v.version_no
       }});
-      await loadVersions(state.class,state.semesterId);
+      await loadVersions(state.class,state.batch,state.semNo);
       await loadVersion(d.version_id);
       msg('Restored v'+v.version_no+' as v'+d.version_no+'.','success');
     }catch(e){ msg(e.message||'Restore failed.','danger'); }
@@ -609,15 +614,20 @@
       const id=Number(hb.dataset.hideVersion); const hidden=hb.dataset.hidden==='1';
       try{
         await erp.fetchJSON('/api/admin/timetable/versions/'+id+'/hide',{method:'POST',body:{hidden:!hidden}});
-        await loadVersions(state.class,state.semesterId); renderHistory();
+        await loadVersions(state.class,state.batch,state.semNo); renderHistory();
         erp.toast((hidden?'Unhid':'Hid')+' version','success');
       }catch(err){ erp.toast(err.message||'Update failed','danger'); }
     }
   });
 
   $('loadBtn').addEventListener('click',()=>loadClass($('classSelect').value));
-  $('classSelect').addEventListener('change',()=>loadClass($('classSelect').value));
-  $('semesterSelect').addEventListener('change',()=>loadClass($('classSelect').value));
+  function syncBatchSemFromClass(cls){
+    const m=/^(\d{2})IT(\d)([AB])$/i.exec((cls||'').trim());
+    if(m){ $('batchSelect').value=String(2000+Number(m[1])); $('semSelect').value=String(Number(m[2])); }
+  }
+  $('classSelect').addEventListener('change',()=>{ syncBatchSemFromClass($('classSelect').value); loadClass($('classSelect').value); });
+  $('batchSelect').addEventListener('change',()=>loadClass($('classSelect').value));
+  $('semSelect').addEventListener('change',()=>loadClass($('classSelect').value));
   $('newBtn').addEventListener('click',createClass);
   $('validateBtn').addEventListener('click',validateData);
   $('saveBtn').addEventListener('click',saveVersion);
@@ -627,7 +637,7 @@
   async function previewImport(){
     $('importResult').textContent='Parsing...';
     try{
-      const d=await erp.fetchJSON('/api/admin/timetable/import/preview',{method:'POST',body:{class:$('classSelect').value,semester_id:state.semesterId,text:$('importText').value}});
+      const d=await erp.fetchJSON('/api/admin/timetable/import/preview',{method:'POST',body:{class:$('classSelect').value,batch_start_year:state.batch,sem_no:state.semNo,text:$('importText').value}});
       state._importPreview=d; state._importText=$('importText').value;
       $('importResult').textContent=`Preview OK for ${d.class}. Staff: ${d.staff_count}. Warnings: ${(d.warnings||[]).length}\n` + (d.warnings||[]).join('\n');
       if(d.data){ state.data=d.data; state.class=d.class; renderEditor(); setDirty(true); msg('Import preview loaded into editor. Review then Apply.','success'); }
@@ -637,8 +647,8 @@
     if(!confirm('Apply import as a NEW timetable version and sync staff?')) return;
     $('importResult').textContent='Applying...';
     try{
-      const d=await erp.fetchJSON('/api/admin/timetable/import/apply',{method:'POST',body:{class:$('classSelect').value,semester_id:state.semesterId,effective_from:$('effectiveFrom').value,text:$('importText').value,notes:'Imported timetable'}});
-      await loadVersions(d.class||$('classSelect').value,state.semesterId); if(d.version_id) await loadVersion(d.version_id);
+      const d=await erp.fetchJSON('/api/admin/timetable/import/apply',{method:'POST',body:{class:$('classSelect').value,batch_start_year:state.batch,sem_no:state.semNo,effective_from:$('effectiveFrom').value,text:$('importText').value,notes:'Imported timetable'}});
+      await loadVersions(d.class||$('classSelect').value,state.batch,state.semNo); if(d.version_id) await loadVersion(d.version_id);
       $('importResult').textContent=`Imported ${d.class} v${d.version_no}. Staff sync: ${JSON.stringify(d.staff_sync||{})}`;
       erp.toast('Timetable imported as new version','success');
     }catch(e){ const data=e.data||{}; $('importResult').textContent=(data.errors||[e.message]).join('\n'); msg(e.message||'Import failed','danger'); }

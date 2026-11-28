@@ -1834,10 +1834,33 @@ def _save_timetable_version(class_name, semester_id, effective_from, payload,
     finally:
         conn.close()
 
+def _resolve_batch_sem_from_request(data=None, args=None):
+    data=data or {}; args=args or request.args
+    sem_raw=(data.get('semester_id') if 'semester_id' in data else args.get('semester_id'))
+    sem_no_raw=(data.get('sem_no') if 'sem_no' in data else args.get('sem_no'))
+    by_raw=(data.get('batch_start_year') if 'batch_start_year' in data else args.get('batch_start_year'))
+    class_name=_norm((data.get('class') if 'class' in data else args.get('class')) or (data.get('class_name') if 'class_name' in data else args.get('class_name')))
+    by=None
+    if by_raw not in (None,''):
+        try: by=int(by_raw)
+        except Exception: by=None
+    if by is None and class_name:
+        info=parse_cohort_class(class_name)
+        by=info.get('batch_start_year') if info else None
+    sem=None
+    if sem_no_raw not in (None,'') and by is not None:
+        try: sem=get_or_create_batch_semester(by,int(sem_no_raw),actor=session.get('username') or 'admin')
+        except Exception: sem=None
+    elif sem_raw not in (None,''):
+        sem=_semester_by_id(sem_raw)
+        if sem and by is None: by=sem.get('batch_start_year')
+    return sem, by
+
 @app.route('/admin/timetable')
 @admin_required
 def admin_timetable_page():
-    return render_template('admin_timetable.html', classes=get_classes(), semesters=_semester_rows(), today=_today_ist_str())
+    batches=[{'batch_start_year':by,'label':batch_label(by)} for by in BATCH_START_YEARS]
+    return render_template('admin_timetable.html', classes=get_classes(), batches=batches, today=_today_ist_str())
 
 @app.route('/api/admin/timetables')
 @admin_required
@@ -1917,16 +1940,11 @@ def api_admin_timetable_create(class_name):
 @admin_required
 def api_admin_timetable_versions():
     cls=_norm(request.args.get('class') or '')
-    sem_raw=(request.args.get('semester_id') or '').strip()
-    if sem_raw:
-        try: sem_id=int(sem_raw)
-        except Exception: return jsonify({'ok':False,'error':'Invalid semester.'}), 400
-    else:
-        sem=_current_semester()
-        sem_id=int(sem['id']) if sem else None
+    sem, by=_resolve_batch_sem_from_request()
+    sem_id=int(sem['id']) if sem and sem.get('id') else None
     rows=_timetable_version_rows(cls or None,sem_id,include_hidden=True)
     versions=[_timetable_version_json(r) for r in rows]
-    return jsonify({'ok':True,'class':cls,'semester_id':sem_id,'versions':versions})
+    return jsonify({'ok':True,'class':cls,'batch_start_year':by,'semester_id':sem_id,'sem_no':(sem or {}).get('sem_no'),'versions':versions})
 
 @app.route('/api/admin/timetable/versions/<int:version_id>', methods=['GET'])
 @admin_required
@@ -1953,11 +1971,8 @@ def api_admin_timetable_import_preview():
     data=request.get_json(silent=True) or {}
     text=data.get('text') or ''
     cls=canonical_class_name(data.get('class') or '')
-    sem_raw=data.get('semester_id')
-    sem_id=None
-    if sem_raw not in (None,''):
-        try: sem_id=int(sem_raw)
-        except Exception: return jsonify({'ok':False,'error':'Invalid semester.'}), 400
+    sem, _by=_resolve_batch_sem_from_request(data=data)
+    sem_id=int(sem['id']) if sem and sem.get('id') else None
     res=_parse_timetable_import(text, cls, sem_id)
     return jsonify(res), (200 if res.get('ok') else 400)
 
@@ -1967,8 +1982,7 @@ def api_admin_timetable_import_apply():
     data=request.get_json(silent=True) or {}
     text=data.get('text') or ''
     cls=canonical_class_name(data.get('class') or '')
-    sem_raw=data.get('semester_id')
-    sem=_semester_by_id(sem_raw) if sem_raw not in (None,'') else _current_semester()
+    sem, _by=_resolve_batch_sem_from_request(data=data)
     sem_id=int(sem['id']) if sem else None
     effective_from=(data.get('effective_from') or _today_ist_str()).strip()
     preview=_parse_timetable_import(text, cls, sem_id)
@@ -1992,12 +2006,8 @@ def api_admin_timetable_version_create():
     cls=canonical_class_name(data.get('class') or '')
     if not cls: return jsonify({'ok':False,'error':'Class is required.'}), 400
     if not is_valid_class_name(cls): return jsonify({'ok':False,'error':'Invalid class name. Use YYIT<sem><section>.'}), 400
-    sem_raw=data.get('semester_id')
-    if sem_raw in (None,''):
-        sem=_current_semester(); sem_id=int(sem['id']) if sem else None
-    else:
-        try: sem_id=int(sem_raw)
-        except Exception: return jsonify({'ok':False,'error':'Invalid semester.'}), 400
+    sem, _by=_resolve_batch_sem_from_request(data=data)
+    sem_id=int(sem['id']) if sem and sem.get('id') else None
     effective_from=(data.get('effective_from') or _today_ist_str()).strip()
     payload=data.get('data') if isinstance(data.get('data'),dict) else data.get('timetable')
     if not isinstance(payload,dict):
@@ -2046,9 +2056,9 @@ def api_admin_timetable_version_restore(version_id):
     try: payload=json.loads(raw or '{}')
     except Exception: return jsonify({'ok':False,'error':'Stored timetable is invalid.'}), 400
     eff=(data.get('effective_from') or _today_ist_str()).strip()
-    if data.get('semester_id') not in (None,''):
-        try: sem_id=int(data.get('semester_id'))
-        except Exception: pass
+    sem,_by=_resolve_batch_sem_from_request(data=data)
+    if sem and sem.get('id'):
+        sem_id=int(sem['id'])
     notes=((data.get('notes') or '').strip() or f'Restored from version {version_no}').strip()
     res=_save_timetable_version(cls,sem_id,eff,payload,reference_path=(ref_path or ''),
                                 reference_name=(ref_name or ''),notes=notes)
@@ -5283,7 +5293,8 @@ def api_admin_semesters_rollover_apply():
 @app.route('/admin/calendar')
 @admin_required
 def admin_calendar_page():
-    return render_template('admin_calendar.html', user=_current_user())
+    batches=[{'batch_start_year':by,'label':batch_label(by)} for by in BATCH_START_YEARS]
+    return render_template('admin_calendar.html', user=_current_user(), batches=batches, today=_today_ist_str())
 
 @app.route('/api/admin/calendar', methods=['GET'])
 @admin_required

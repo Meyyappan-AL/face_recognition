@@ -37,7 +37,14 @@
       </div>
       <div class="col-lg-8">
         <div class="card p-3 shadow-sm glass-card">
-          <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2"><h5 class="mb-0">Calendar Entries</h5><button id="reloadCal" class="btn btn-outline-secondary btn-sm">Refresh</button></div>
+          <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <div><h5 class="mb-0">Calendar Entries</h5><div class="small text-muted">Batch-sem context (view): <span id="calBatchCtx"></span></div></div>
+            <div class="d-flex gap-2 align-items-end flex-wrap">
+              <div><label class="form-label small mb-1">Batch</label><select id="calBatch" class="form-select form-select-sm">{% for b in batches %}<option value="{{b.batch_start_year}}">{{b.label}}</option>{% endfor %}</select></div>
+              <div><label class="form-label small mb-1">Sem</label><select id="calSem" class="form-select form-select-sm">{% for n in range(1,9) %}<option value="{{n}}">Sem {{n}}</option>{% endfor %}</select></div>
+              <button id="reloadCal" class="btn btn-outline-secondary btn-sm">Refresh</button>
+            </div>
+          </div>
           <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Date(s)</th><th>Type</th><th>Title</th><th>Class</th><th>Notes</th><th></th></tr></thead><tbody id="calBody"><tr><td colspan="6" class="small text-muted">Loading...</td></tr></tbody></table></div>
         </div>
       </div>
@@ -49,7 +56,17 @@
 const $=id=>document.getElementById(id);
 const esc=s=>(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 function msg(t,c='text-muted'){const e=$('calMsg'); if(e){e.className='small mt-2 '+c; e.textContent=t;}}
+const BATCHES={{ batches|tojson }};
+async function updateBatchCtx(){
+  const by=Number($('calBatch').value); const sn=Number($('calSem').value);
+  try{
+    const r=await fetch('/api/admin/semesters?batch_start_year='+encodeURIComponent(by)); const d=await r.json();
+    const sem=(d.semesters||[]).find(s=>Number(s.sem_no)==sn);
+    $('calBatchCtx').textContent = sem ? `${d.batch_label||by} Sem ${sn} (${sem.start_date} to ${sem.end_date})` : `${by} Sem ${sn}`;
+  }catch(e){ $('calBatchCtx').textContent=`${by} Sem ${sn}`; }
+}
 async function loadCal(){
+  await updateBatchCtx();
   const r=await fetch('/api/admin/calendar'); const d=await r.json(); const rows=d.items||[];
   $('calBody').innerHTML=rows.length?rows.map(x=>`<tr><td class="small">${esc(x.date)}${x.end_date&&x.end_date!==x.date?' ? '+esc(x.end_date):''}</td><td><span class="badge ${x.type==='holiday'?'bg-danger':x.type==='event'?'bg-info text-dark':x.type==='exam'?'bg-warning text-dark':'bg-secondary'}">${esc(x.type)}</span></td><td>${esc(x.title)}</td><td class="small">${esc(x.class_name||'All')}</td><td class="small text-muted">${esc(x.notes||'')}</td><td><button class="btn btn-outline-danger btn-sm" onclick="delCal(${x.id})">Delete</button></td></tr>`).join(''):'<tr><td colspan="6" class="small text-muted">No entries. Add holidays/events to inform student dashboards.</td></tr>';
 }
@@ -66,6 +83,6 @@ $('calForm').addEventListener('submit', async e=>{
 });
 $('calStartDate').addEventListener('change',()=>{ $('calEndDate').min=$('calStartDate').value||''; });
 window.delCal=async id=>{ if(!confirm('Delete this calendar entry?')) return; const r=await fetch('/api/admin/calendar/'+id,{method:'DELETE'}); const d=await r.json().catch(()=>({})); if(r.ok&&d.ok) loadCal(); else msg(d.error||'Delete failed','text-danger'); };
-$('reloadCal').addEventListener('click', loadCal); loadCal();
+$('reloadCal').addEventListener('click', loadCal); $('calBatch').addEventListener('change', loadCal); $('calSem').addEventListener('change', loadCal); loadCal();
 </script>
 {% endblock %}
