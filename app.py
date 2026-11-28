@@ -2304,6 +2304,11 @@ def _parse_timetable_import(text, class_hint='', semester_id=None):
         advisor_code=name_to_code.get(adv_clean.upper(),'') or name_to_code.get(advisor_name.upper(),'')
         if not advisor_code:
             advisor_code=_add_staff(advisor_name)
+    selected_cls=canonical_class_name(class_hint)
+    if not cls and selected_cls and is_valid_class_name(selected_cls):
+        cls=selected_cls
+    if cls and selected_cls and is_valid_class_name(selected_cls) and cls!=selected_cls:
+        errors.append(f'Import class "{cls}" does not match selected class "{selected_cls}". Select correct class or fix CLASS line.')
     if not cls:
         errors.append('Class not found. Include CLASS line or choose class in the form.')
     elif not is_valid_class_name(cls):
