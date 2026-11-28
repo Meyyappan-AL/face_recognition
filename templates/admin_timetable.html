@@ -93,6 +93,8 @@
             <div>
               <h6 class="erp-section-title mb-1">Manual grid</h6>
               <div class="erp-muted small">Each cell uses <strong>subject</strong> + comma-separated <strong>staff codes</strong>. Separate elective options with <code>|</code>.</div>
+              <div id="statusMsg" class="small text-muted mt-1">Select a class to begin.</div>
+              <div id="editorMeta" class="small text-muted">Class - | Batch - | Sem - | Version none</div>
             </div>
             <div class="d-flex gap-2 flex-wrap">
               <button id="validateBtn" class="btn btn-outline-primary btn-sm" type="button">Validate</button>
@@ -414,6 +416,7 @@
     renderReference();
     renderVersion();
     setDirty(state.dirty);
+    $('editorMeta').textContent = `Class ${state.class||'-'} | Batch ${state.batch||'-'} | Sem ${state.semNo||'-'} | Version ${state.versionId||'none'}`;
     if(!$('rawWrap').classList.contains('d-none')) $('rawText').value=JSON.stringify(collectData(),null,2);
   }
 
@@ -454,17 +457,18 @@
   async function loadClass(cls){
     if(!cls){ state.data=null; renderEditor(); return; }
     if(state.dirty && !confirm('Discard unsaved changes and load '+cls+'?')){ $('classSelect').value=state.class; return; }
-    state.class=cls; state.versionId=null; state.batch=currentBatch(); state.semNo=currentSemNo(); state.semesterId=null;
+    cls=String(cls||'').toUpperCase().trim();
+    state.class=cls; state.versionId=null; state.versions=[]; state.batch=currentBatch(); state.semNo=currentSemNo(); state.semesterId=null;
     state.data=emptyTimetable(cls); state.referencePath=''; state.referenceName=''; state.referenceUrl=''; state.notes=''; state.dirty=false;
-    $('classSelect').value=cls; renderEditor(); msg('Loading '+cls+'...');
+    $('classSelect').value=cls; $('importResult').textContent=''; clearLists(); renderHistory(); renderEditor();
+    msg('Loading '+cls+' (batch '+state.batch+', sem '+state.semNo+')...');
     try{
-      clearLists();
       await loadVersions(cls,state.batch,state.semNo);
       const pick=state.versions.find(v=>v.status==='current')||state.versions[0];
       if(pick){ await loadVersion(pick.id); return; }
       try{ await loadLegacy(cls); }
-      catch(le){ state.data=emptyTimetable(cls); state.versionId=null; state.dirty=false; renderEditor(); msg('No timetable version for '+cls+' in selected batch/sem. Create or import one.','warning'); }
-    }catch(e){ state.data=emptyTimetable(cls); state.versionId=null; state.dirty=false; renderEditor(); msg(e.message||'Could not load timetable.','danger'); erp.toast(e.message||'Load failed','danger'); }
+      catch(le){ state.data=emptyTimetable(cls); state.versionId=null; state.dirty=false; renderHistory(); renderEditor(); msg('No timetable version for '+cls+' in selected batch/sem. Create or import one.','warning'); }
+    }catch(e){ state.data=emptyTimetable(cls); state.versionId=null; state.versions=[]; state.dirty=false; renderHistory(); renderEditor(); msg(e.message||'Could not load timetable.','danger'); erp.toast(e.message||'Load failed','danger'); }
   }
 
   async function validateData(){
@@ -631,9 +635,9 @@
     const m=/^(\d{2})IT(\d)([AB])$/i.exec((cls||'').trim());
     if(m){ $('batchSelect').value=String(2000+Number(m[1])); $('semSelect').value=String(Number(m[2])); }
   }
-  $('classSelect').addEventListener('change',()=>{ syncBatchSemFromClass($('classSelect').value); loadClass($('classSelect').value); });
-  $('batchSelect').addEventListener('change',()=>loadClass($('classSelect').value));
-  $('semSelect').addEventListener('change',()=>loadClass($('classSelect').value));
+  $('classSelect').addEventListener('change',async ()=>{ syncBatchSemFromClass($('classSelect').value); await loadClass($('classSelect').value); });
+  $('batchSelect').addEventListener('change',async ()=>{ await loadClass($('classSelect').value); });
+  $('semSelect').addEventListener('change',async ()=>{ await loadClass($('classSelect').value); });
   $('newBtn').addEventListener('click',createClass);
   $('validateBtn').addEventListener('click',validateData);
   $('saveBtn').addEventListener('click',saveVersion);
