@@ -629,12 +629,9 @@
     try{
       const d=await erp.fetchJSON('/api/admin/timetable/import/preview',{method:'POST',body:{class:$('classSelect').value,semester_id:state.semesterId,text:$('importText').value}});
       state._importPreview=d; state._importText=$('importText').value;
-      $('importResult').textContent=`Preview OK for ${d.class}. Staff: ${d.staff_count}. Warnings: ${(d.warnings||[]).length}
-` + (d.warnings||[]).join('
-');
+      $('importResult').textContent=`Preview OK for ${d.class}. Staff: ${d.staff_count}. Warnings: ${(d.warnings||[]).length}\n` + (d.warnings||[]).join('\n');
       if(d.data){ state.data=d.data; state.class=d.class; renderEditor(); setDirty(true); msg('Import preview loaded into editor. Review then Apply.','success'); }
-    }catch(e){ const data=e.data||{}; $('importResult').textContent=(data.errors||[e.message]).join('
-'); msg(e.message||'Import preview failed','danger'); }
+    }catch(e){ const data=e.data||{}; $('importResult').textContent=(data.errors||[e.message]).join('\n'); msg(e.message||'Import preview failed','danger'); }
   }
   async function applyImport(){
     if(!confirm('Apply import as a NEW timetable version and sync staff?')) return;
@@ -644,8 +641,7 @@
       await loadVersions(d.class||$('classSelect').value,state.semesterId); if(d.version_id) await loadVersion(d.version_id);
       $('importResult').textContent=`Imported ${d.class} v${d.version_no}. Staff sync: ${JSON.stringify(d.staff_sync||{})}`;
       erp.toast('Timetable imported as new version','success');
-    }catch(e){ const data=e.data||{}; $('importResult').textContent=(data.errors||[e.message]).join('
-'); msg(e.message||'Import failed','danger'); }
+    }catch(e){ const data=e.data||{}; $('importResult').textContent=(data.errors||[e.message]).join('\n'); msg(e.message||'Import failed','danger'); }
   }
   $('previewImportBtn').addEventListener('click',previewImport);
   $('applyImportBtn').addEventListener('click',applyImport);
