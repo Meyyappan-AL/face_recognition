@@ -2531,7 +2531,7 @@ def _sem_edit_allowed(sem_row):
 @admin_required
 def admin_electives_page():
     batches=[{'batch_start_year':by,'label':batch_label(by)} for by in BATCH_START_YEARS]
-    return render_template('admin_electives.html', classes=get_classes(), batches=batches, today=_today_ist_str())
+    return render_template('admin_electives.html', classes=get_classes(), batches=batches, today=_today_ist_str(), semesters=[])
 
 @app.route('/api/admin/electives')
 @admin_required
@@ -4373,6 +4373,15 @@ def _now_iso(): return datetime.datetime.utcnow().isoformat()
 def _today_ist_str(): return _now_ist().date().isoformat()
 
 def _semester_info():
+    sem=_current_semester()
+    if sem:
+        return {
+            'label': sem.get('label') or get_setting('semester_label', 'Current Semester') or 'Current Semester',
+            'start': sem.get('start_date') or get_setting('semester_start', '') or '',
+            'end': sem.get('end_date') or get_setting('semester_end', '') or '',
+            'threshold': get_setting('defaulter_threshold', '75') or '75',
+            'sem_no': sem.get('sem_no'), 'batch_start_year': sem.get('batch_start_year'),
+        }
     return {
         'label': get_setting('semester_label', 'Current Semester') or 'Current Semester',
         'start': get_setting('semester_start', '') or '',
@@ -6407,9 +6416,16 @@ def medical_page():
     role = session.get('role')
     student = _resolve_student_for_user() if role == 'student' else None
     contact = _advisor_contact_for_class((student[3] if student else session.get('advisor_class')) or '')
+    sem=None
+    if student:
+        info=parse_cohort_class(student[3] or '')
+        by=info.get('batch_start_year') if info else None
+        if by is not None:
+            sem=_batch_semester_row(by, current_sem_for_batch(by, on_date=_today_ist_str()))
+    if not sem: sem=_current_semester()
     return render_template('medical.html', user=_current_user(), student=student, classes=get_classes(),
                            today=_today_ist_str(), advisor_contact=contact,
-                           current_semester=_semester_json(_current_semester()) if _current_semester() else None)
+                           current_semester=_semester_json(sem, batch_start_year=(sem or {}).get('batch_start_year'), on_date=_today_ist_str()) if sem else None)
 
 @app.route('/api/medical/request', methods=['POST'])
 @student_required

@@ -9,7 +9,7 @@ This file is the source of truth for continuing the ERP project in a new chat. R
 - **Project:** Flask academic ERP with manual period-wise attendance, OD workflow, timetables, electives, staff/HOD/advisor management, notification center, audit log, reports, and student dashboard.
 - **Working directory:** `C:\Users\alagu\OneDrive\Documents\Desktop\git repo\face_recognition`
 - **Main files:** `app.py`, `model.py`, `templates/`, `static/`, `timetables/`
-- **Database:** SQLite `attendance.db` (local runtime file, ignored by git)
+- **Database:** SQLite `attendance.db` (local runtime file, ignored by git; never commit)
 - **UI stack:** Bootstrap 5.3.1, vanilla JavaScript, custom `static/css/erp.css` and `static/js/erp.js`
 - **Python:** Must be below Python 3.13 for the optional MediaPipe path. Current install scripts enforce this.
 - **Platform used for development:** Windows PowerShell 5.1. `rg` is unavailable, so use the built-in `grep` tool instead of shell `rg`.
@@ -35,8 +35,14 @@ This file is the source of truth for continuing the ERP project in a new chat. R
 
 The ERP is functional for the main admin, staff, HOD/advisor, and student flows. Recent work added notification infrastructure, active-account enforcement, dependency/env files, a shared base template/nav for most admin pages, persisted default-Absent materialization, semester-end edit windows, day-of OD application, semester-scoped timetable versions with a manual grid editor and PDF/image reference upload, version-scoped elective mappings with immutable per-entry elective labels and a shared elective roster, role-scoped attendance insights with comparisons/absence filters, medical leave and student analytics, and admin-only webcam/video face attendance with review-before-submit. Wave 2 adds real `N` status, stored `-` unmarked periods, configurable marking window, in-app staff unmarked-period reminders, and calendar/timetable/elective polish. Wave 3 adds webcam lifecycle/permission reliability fixes and optional YuNet/SFace model support with graceful fallback. Wave 4 completes records/reports finalization with filter-aware exports, staff-scoped CSVs, custom date ranges, clearer `Absent/N` wording, IST-safe defaults, and print/layout polish.
 
+Batch-semester redesign (Phases 1-5) is implemented: batches 2023-27/2024-28/2025-29/2026-30, S1-S8 per batch with configurable default date boundaries, batch-relative auto-current semester, admin rollover preview/apply with audit and current-state-only renames, timetable/elective batch+sem selectors, S5-S8 elective gating, started-sem visibility for staff/students and all 1-8 for admin, and batch-sem propagation to reports/records/student dashboard/admin student attendance.
+
 ### Completed and verified
 
+- Batch-semester redesign: `semesters` rows carry `batch_start_year,sem_no,is_auto` (unique per batch+sem); `class_cohorts` tracks stable cohort identity/current class; S1-S8 auto-seeded for 2023-2026 batches; default odd `01/08-31/12`, even `01/01-20/04`; current sem auto-calc by batch/date with admin boundary edits/reset.
+- Rollover: admin preview/apply by batch (S1->S2 ... S7->S8), audited, current-state only (`students.class/study_year`, staff advisor class, cohort current class, timetable JSON mirror); historical attendance/medical/OD/notifications/audit class names are not rewritten.
+- Timetable/electives: admin timetable/electives use batch+Sem 1-8 selectors; timetable version/import/apply/restore accept batch+sem context; electives enabled only S5-S8 and blocked/hidden S1-S4; staff/students cannot edit current/previous-sem timetable/elective data, admin can; attendance edit-window rules unchanged.
+- Batch-sem propagation: reports/analytics, attendance records, admin student attendance, student dashboard APIs/JS, elective export/import resolve `batch_start_year+sem_no`; staff/students see started sems only, admin sees all 1-8.
 - Timetable-backed classes are dynamic via `get_classes()`. Current timetable classes are `24IT5A` and `24IT5B`.
 - Staff sync from timetables preserves existing passwords by default.
 - Admin pages are available for:
@@ -222,7 +228,12 @@ Do not hardcode user ids in application code. Test scripts should query the DB i
 
 ## 6. Pending Work / Known Gaps
 
-### A. Base template and navigation cleanup
+### A. Batch-semester Phase 5 hardening
+- Run guarded migration smoke on a fresh copy of real `attendance.db` (backup first, temp DB path, workers off); verify S1-S8 per batch, cohort rows, no duplicate batch-sem rows, and key routes load.
+- Audit any remaining user-facing global-semester assumptions and replace with batch-sem context where needed.
+- Manual browser QA for batch-sem UI (semesters, timetable, electives, reports/records/student dashboard/admin filters).
+
+### B. Base template and navigation cleanup
 
 - Main pages are now migrated to `base.html` and return 200 for Admin, Staff, and Student roles.
 - Remaining standalone templates:
