@@ -166,14 +166,61 @@ def _normalize_dob(dob):
         except Exception: pass
     return dob
 
+def batch_label(batch_start_year):
+    try:
+        y=int(batch_start_year)
+        return f'{y}-{y+4}'
+    except Exception:
+        return ''
+
+def _batch_start_year_from_label(value):
+    v=_norm(value)
+    m=re.fullmatch(r'(\d{4})\s*-\s*(\d{4})', v)
+    if not m: return None
+    start,end=int(m.group(1)),int(m.group(2))
+    if end!=start+4: return None
+    return start
+
+def default_batch_sem_dates(batch_start_year, sem_no):
+    """Default batch-sem calendar: odd 01/08-31/12, even 01/01-20/04 (gap 21/04-31/07 intended)."""
+    y=int(batch_start_year); sem=int(sem_no)
+    if sem<1 or sem>8: raise ValueError('sem_no must be 1..8')
+    academic_year=y + ((sem-1)//2)
+    if sem % 2 == 1:
+        start=datetime.date(academic_year,8,1)
+        end=datetime.date(academic_year,12,31)
+    else:
+        start=datetime.date(academic_year+1,1,1)
+        end=datetime.date(academic_year+1,4,20)
+    return start.isoformat(), end.isoformat()
+
+def batch_sem_label(batch_start_year, sem_no):
+    return f"{batch_label(batch_start_year)} Sem {int(sem_no)}"
+
+def cohort_key_for(batch_start_year, section):
+    sec=_norm(section).upper() or 'A'
+    sec=re.sub(r'[^A-Z0-9]','',sec)[:4] or 'A'
+    return f"{int(batch_start_year)}:{sec}"
+
+def class_name_for_cohort(batch_start_year, sem_no, section):
+    yy=str(int(batch_start_year) % 100).zfill(2)
+    sec=_norm(section).upper() or 'A'
+    sec=re.sub(r'[^A-Z0-9]','',sec)[:4] or 'A'
+    return f"{yy}IT{int(sem_no)}{sec}"
+
+def parse_cohort_class(class_name):
+    name=canonical_class_name(class_name)
+    m=CLASS_NAME_RE.match(name)
+    if not m: return None
+    start=2000+int(m.group(1)); sem=int(m.group(2)); section=m.group(3).upper()
+    return {'class_name':name,'batch_start_year':start,'sem_no':sem,'section':section,'cohort_key':cohort_key_for(start,section),'batch_label':batch_label(start)}
+
 def _class_year_info(class_name):
     """Infer batch/study year from class like 24IT5A. Rule: sem1-2=Y1,3-4=Y2,5-6=Y3,7-8=Y4."""
-    name = canonical_class_name(class_name)
-    m = CLASS_NAME_RE.match(name)
-    if not m:
+    info=parse_cohort_class(class_name)
+    if not info:
         return '', ''
-    start = 2000 + int(m.group(1))
-    sem = int(m.group(2))
+    start=info['batch_start_year']; sem=info['sem_no']
     study = (sem + 1) // 2
     return f'{start}-{start + 4}', study
 
@@ -233,6 +280,13 @@ def _env(name, default=''):
 CLASS_REGISTRY = ['23IT7A', '23IT7B', '24IT5A', '24IT5B', '25IT3A', '25IT3B']
 LEGACY_CLASS_MAP = {'24IIT5A': '24IT5A', '24IIT5B': '24IT5B', '24ITR7A': '23IT7A'}
 CLASS_NAME_RE = re.compile(r'^(\d{2})IT([1-8])([A-Z])$')
+BATCH_REGISTRY = [
+    {'batch_start_year':2023,'label':'2023-2027'},
+    {'batch_start_year':2024,'label':'2024-2028'},
+    {'batch_start_year':2025,'label':'2025-2029'},
+    {'batch_start_year':2026,'label':'2026-2030'},
+]
+BATCH_START_YEARS = [b['batch_start_year'] for b in BATCH_REGISTRY]
 
 def canonical_class_name(class_name: str) -> str:
     name = _norm(class_name).upper()
@@ -489,6 +543,20 @@ def init_db():
                     is_current INTEGER DEFAULT 0,
                     created_by TEXT, created_at TEXT, updated_at TEXT
                 )""")
+    for col,coldef in [('batch_start_year','INTEGER'),('sem_no','INTEGER'),('is_auto','INTEGER DEFAULT 1')]:
+        _ensure_column(c,'semesters',col,coldef)
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_semesters_batch_sem ON semesters(batch_start_year, sem_no) WHERE batch_start_year IS NOT NULL AND sem_no IS NOT NULL")
+    c.execute("""CREATE TABLE IF NOT EXISTS class_cohorts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cohort_key TEXT NOT NULL UNIQUE,
+                    batch_start_year INTEGER NOT NULL,
+                    section TEXT NOT NULL,
+                    current_sem_no INTEGER NOT NULL,
+                    current_class_name TEXT NOT NULL,
+                    active INTEGER DEFAULT 1,
+                    created_at TEXT, updated_at TEXT
+                )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_class_cohorts_current_class ON class_cohorts(current_class_name)")
     c.execute("""CREATE TABLE IF NOT EXISTS timetable_versions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     class_name TEXT NOT NULL,
@@ -694,24 +762,27 @@ def seed_defaults():
     sync_staff_from_timetables(reset_passwords=False)
 
 def ensure_semester_seed():
-    """Create a first semester row from legacy settings when none exist."""
+    """Seed legacy global semester and batch-relative S1-S8 rows for known batches."""
     conn=_db(); c=conn.cursor()
     try:
         c.execute('SELECT COUNT(*) FROM semesters'); n=int(c.fetchone()[0] or 0)
-        if n: return
-        c.execute("SELECT key,value FROM app_settings WHERE key IN ('semester_label','semester_start','semester_end')")
-        vals=dict(c.fetchall())
-        label=(vals.get('semester_label') or 'Semester 1').strip() or 'Semester 1'
-        start=(vals.get('semester_start') or '').strip()
-        end=(vals.get('semester_end') or '').strip()
-        now=datetime.datetime.utcnow().isoformat()
-        c.execute('INSERT INTO semesters (label,start_date,end_date,is_current,created_by,created_at,updated_at) VALUES (?,?,?,1,?,?,?)',
-                  (label,start,end,'system',now,now))
-        conn.commit()
+        if not n:
+            c.execute("SELECT key,value FROM app_settings WHERE key IN ('semester_label','semester_start','semester_end')")
+            vals=dict(c.fetchall())
+            label=(vals.get('semester_label') or 'Semester 1').strip() or 'Semester 1'
+            start=(vals.get('semester_start') or '').strip(); end=(vals.get('semester_end') or '').strip()
+            now=datetime.datetime.utcnow().isoformat()
+            c.execute('INSERT INTO semesters (label,start_date,end_date,is_current,created_by,created_at,updated_at,batch_start_year,sem_no,is_auto) VALUES (?,?,?,1,?,?,?,NULL,NULL,0)',
+                      (label,start,end,'system',now,now))
+            conn.commit()
     except Exception:
-        pass
+        try: conn.rollback()
+        except Exception: pass
     finally:
         conn.close()
+    for by in BATCH_START_YEARS:
+        try: ensure_batch_semesters(by, actor='system')
+        except Exception: pass
 
 def seed_timetable_versions():
     """Migrate existing timetable JSON files into version 1 for the current semester."""
@@ -746,7 +817,98 @@ def seed_timetable_versions():
     finally:
         conn.close()
 
-init_db(); seed_defaults(); ensure_semester_seed(); seed_timetable_versions()
+def _infer_batch_start_year_from_class(class_name):
+    info=parse_cohort_class(class_name)
+    return info.get('batch_start_year') if info else None
+
+def ensure_class_cohorts_seed():
+    """Seed stable cohort rows from registry/students/classes without rewriting historical records."""
+    now=datetime.datetime.utcnow().isoformat()
+    conn=_db(); c=conn.cursor()
+    try:
+        names=set(list(CLASS_REGISTRY))
+        try:
+            c.execute("SELECT DISTINCT class FROM students WHERE class IS NOT NULL AND TRIM(class)!=''")
+            names.update([canonical_class_name(r[0]) for r in c.fetchall() if r and r[0]])
+        except Exception: pass
+        try:
+            c.execute("SELECT DISTINCT class_name FROM timetable_versions WHERE class_name IS NOT NULL AND TRIM(class_name)!=''")
+            names.update([canonical_class_name(r[0]) for r in c.fetchall() if r and r[0]])
+        except Exception: pass
+        try:
+            for fn in os.listdir(TIMETABLE_DIR):
+                if fn.lower().endswith('.json'): names.add(canonical_class_name(os.path.splitext(fn)[0]))
+        except Exception: pass
+        for name in sorted(names):
+            info=parse_cohort_class(name)
+            if not info: continue
+            by, sec = info['batch_start_year'], info['section']
+            ck=cohort_key_for(by,sec)
+            cur_sem=current_sem_for_batch(by) or info['sem_no']
+            cur_name=class_name_for_cohort(by,cur_sem,sec)
+            c.execute("""INSERT INTO class_cohorts(cohort_key,batch_start_year,section,current_sem_no,current_class_name,active,created_at,updated_at)
+                         VALUES (?,?,?,?,?,1,?,?)
+                         ON CONFLICT(cohort_key) DO UPDATE SET
+                           batch_start_year=excluded.batch_start_year,
+                           section=excluded.section,
+                           updated_at=excluded.updated_at""",
+                      (ck,by,sec,cur_sem,cur_name,now,now))
+            # if cohort exists, keep its current_sem_no/current_class_name if already set; but ensure current sem row exists
+            try: ensure_batch_semesters(by, actor='migration')
+            except Exception: pass
+        conn.commit()
+    except Exception:
+        try: conn.rollback()
+        except Exception: pass
+    finally:
+        conn.close()
+
+def migrate_semester_ids_best_effort():
+    """Map existing global semester references to batch-sem rows when derivable; never rewrite historical class_name."""
+    conn=_db(); c=conn.cursor()
+    try:
+        # timetable_versions: infer batch from class_name, keep version row's class_name as historical
+        c.execute("SELECT id,class_name,semester_id,effective_from FROM timetable_versions")
+        for vid, cls, sem_id, eff in c.fetchall():
+            info=parse_cohort_class(cls)
+            if not info: continue
+            by=info['batch_start_year']
+            sem=None
+            if sem_id:
+                old=_semester_by_id(sem_id)
+                if old and old.get('batch_start_year')==by and old.get('sem_no'):
+                    sem=old
+            if not sem:
+                sn=current_sem_for_batch(by,on_date=eff or datetime.date.today().isoformat())
+                sem=get_or_create_batch_semester(by,sn,actor='migration')
+            if sem and sem.get('id') and int(sem.get('id'))!=int(sem_id or 0):
+                c.execute("UPDATE timetable_versions SET semester_id=? WHERE id=?", (int(sem['id']), vid))
+        # medical_requests: prefer class_name batch, fallback to student's current class
+        c.execute("SELECT id,class_name,student_id,semester_id,from_date FROM medical_requests")
+        for rid, cls, sid, sem_id, from_date in c.fetchall():
+            info=parse_cohort_class(cls)
+            if not info and sid:
+                try:
+                    c.execute("SELECT class FROM students WHERE id=?",(sid,))
+                    sr=c.fetchone(); info=parse_cohort_class(sr[0]) if sr and sr[0] else None
+                except Exception: info=None
+            if not info: continue
+            by=info['batch_start_year']
+            old=_semester_by_id(sem_id) if sem_id else None
+            if old and old.get('batch_start_year')==by and old.get('sem_no'):
+                continue
+            sn=current_sem_for_batch(by,on_date=from_date or datetime.date.today().isoformat())
+            sem=get_or_create_batch_semester(by,sn,actor='migration')
+            if sem and sem.get('id'):
+                c.execute("UPDATE medical_requests SET semester_id=? WHERE id=?", (int(sem['id']), rid))
+        conn.commit()
+    except Exception:
+        try: conn.rollback()
+        except Exception: pass
+    finally:
+        conn.close()
+
+init_db(); seed_defaults(); ensure_semester_seed(); seed_timetable_versions(); ensure_class_cohorts_seed(); migrate_semester_ids_best_effort()
 
 # ==============================================================================
 # AUTH / DECORATORS
@@ -4364,39 +4526,137 @@ def _calendar_map_for_range(class_name, d1, d2):
             cur += datetime.timedelta(days=1)
     return by_date
 
-# --- Semesters (admin-managed; one current semester) ---
-SEMESTER_COLS=['id','label','start_date','end_date','is_current','created_by','created_at','updated_at']
+# --- Semesters (admin-managed; legacy global + batch-relative sem 1-8) ---
+SEMESTER_COLS=['id','label','start_date','end_date','is_current','created_by','created_at','updated_at','batch_start_year','sem_no','is_auto']
 
-def _semester_rows():
+def _semester_row_dict(r):
+    d=dict(zip(SEMESTER_COLS,r))
+    d['is_current']=int(d.get('is_current') or 0)
+    for k in ('batch_start_year','sem_no','is_auto'):
+        try: d[k]=int(d[k]) if d.get(k) not in (None,'') else None
+        except Exception: d[k]=None
+    return d
+
+def _semester_rows(batch_start_year=None, include_legacy=True):
     conn=_db(); c=conn.cursor(); rows=[]
     try:
-        c.execute("SELECT id,label,start_date,end_date,is_current,created_by,created_at,updated_at FROM semesters ORDER BY is_current DESC, COALESCE(start_date,'') DESC, id DESC")
-        rows=c.fetchall()
+        q="SELECT id,label,start_date,end_date,is_current,created_by,created_at,updated_at,batch_start_year,sem_no,is_auto FROM semesters WHERE 1=1"
+        params=[]
+        if batch_start_year is not None:
+            q+=" AND batch_start_year=?"; params.append(int(batch_start_year))
+        elif not include_legacy:
+            q+=" AND batch_start_year IS NOT NULL"
+        q+=" ORDER BY CASE WHEN batch_start_year IS NULL THEN 1 ELSE 0 END, batch_start_year DESC, COALESCE(sem_no,99) ASC, is_current DESC, COALESCE(start_date,'') DESC, id DESC"
+        c.execute(q,params); rows=c.fetchall()
     except Exception:
         rows=[]
     finally:
         conn.close()
-    out=[]
-    for r in rows:
-        d=dict(zip(SEMESTER_COLS,r)); d['is_current']=int(d.get('is_current') or 0); out.append(d)
-    return out
+    return [_semester_row_dict(r) for r in rows]
 
 def _semester_by_id(sid):
     try: sid=int(sid)
     except Exception: return None
-    for s in _semester_rows():
-        if int(s['id'])==sid: return s
-    return None
+    conn=_db(); c=conn.cursor()
+    try:
+        c.execute("SELECT id,label,start_date,end_date,is_current,created_by,created_at,updated_at,batch_start_year,sem_no,is_auto FROM semesters WHERE id=?",(sid,))
+        r=c.fetchone(); return _semester_row_dict(r) if r else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+def _batch_semester_row(batch_start_year, sem_no):
+    try: by=int(batch_start_year); sn=int(sem_no)
+    except Exception: return None
+    conn=_db(); c=conn.cursor()
+    try:
+        c.execute("SELECT id,label,start_date,end_date,is_current,created_by,created_at,updated_at,batch_start_year,sem_no,is_auto FROM semesters WHERE batch_start_year=? AND sem_no=?",(by,sn))
+        r=c.fetchone(); return _semester_row_dict(r) if r else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+def get_or_create_batch_semester(batch_start_year, sem_no, actor='system'):
+    row=_batch_semester_row(batch_start_year, sem_no)
+    if row: return row
+    by=int(batch_start_year); sn=int(sem_no)
+    start,end=default_batch_sem_dates(by,sn)
+    now=_now_iso(); who=_norm(actor) or 'system'; label=batch_sem_label(by,sn)
+    conn=_db(); c=conn.cursor()
+    try:
+        c.execute("""INSERT INTO semesters(label,start_date,end_date,is_current,created_by,created_at,updated_at,batch_start_year,sem_no,is_auto)
+                     VALUES (?,?,?,0,?,?,?,?,?,1)""",(label,start,end,who,now,now,by,sn))
+        conn.commit(); sid=c.lastrowid
+    except Exception:
+        conn.rollback(); sid=None
+    finally:
+        conn.close()
+    return _semester_by_id(sid) if sid else _batch_semester_row(by,sn)
+
+def ensure_batch_semesters(batch_start_year, actor='system'):
+    by=int(batch_start_year)
+    return [get_or_create_batch_semester(by, sn, actor=actor) for sn in range(1,9)]
+
+def _normalize_sem_no(v):
+    try:
+        n=int(v)
+        return n if 1<=n<=8 else None
+    except Exception:
+        return None
+
+def current_sem_for_batch(batch_start_year, on_date=None):
+    by=int(batch_start_year)
+    today=_parse_iso_date(on_date) if on_date else _now_ist().date()
+    rows=_semester_rows(batch_start_year=by, include_legacy=False)
+    for s in rows:
+        a=_parse_iso_date(s.get('start_date')); b=_parse_iso_date(s.get('end_date'))
+        if a and b and a<=today<=b:
+            return int(s.get('sem_no') or 0) or None
+    for sn in range(1,9):
+        a,b=[_parse_iso_date(x) for x in default_batch_sem_dates(by,sn)]
+        if a and b and a<=today<=b: return sn
+    # before first sem start -> 1, after last sem end -> 8
+    a1,_=default_batch_sem_dates(by,1); _,b8=default_batch_sem_dates(by,8)
+    if today < _parse_iso_date(a1): return 1
+    if today > _parse_iso_date(b8): return 8
+    return 1
+
+def visible_sem_nos(role, batch_start_year, on_date=None):
+    cur=current_sem_for_batch(batch_start_year,on_date=on_date) or 1
+    role=_norm(role).lower()
+    if role in ('admin','hod'):
+        return list(range(1,9)), cur
+    return list(range(1,cur+1)), cur
 
 def _current_semester():
+    # Legacy/global current semester (compat). Batch-relative current is resolved per batch.
     rows=_semester_rows()
+    for s in rows:
+        if s.get('is_current') and s.get('batch_start_year') is None: return s
     for s in rows:
         if s.get('is_current'): return s
     return rows[0] if rows else None
 
-def _semester_end_for_date(date_str):
-    """Find the semester containing date_str; fall back to current semester/legacy settings."""
+def _semester_end_for_date(date_str, class_name=None, batch_start_year=None):
+    """Find semester containing date_str; prefer batch-relative when batch/class known."""
     d=_parse_iso_date(date_str)
+    info=parse_cohort_class(class_name) if class_name else None
+    by=batch_start_year or (info.get('batch_start_year') if info else None)
+    if d and by is not None:
+        try:
+            by=int(by)
+            rows=_semester_rows(batch_start_year=by, include_legacy=False)
+            for s in rows:
+                a=_parse_iso_date(s.get('start_date')); b=_parse_iso_date(s.get('end_date'))
+                if a and b and a<=d<=b: return s,b
+            # fallback by default date map
+            sn=current_sem_for_batch(by, on_date=d.isoformat())
+            s=get_or_create_batch_semester(by,sn)
+            return s, _parse_iso_date((s or {}).get('end_date'))
+        except Exception:
+            pass
     if d:
         for s in _semester_rows():
             a=_parse_iso_date(s.get('start_date')); b=_parse_iso_date(s.get('end_date'))
@@ -4450,10 +4710,24 @@ def _semester_window(semester, class_name=None, today=None):
     if (d2-d1).days>366: d1=d2-datetime.timedelta(days=366)
     return d1,d2
 
-def _semester_json(s):
+def _semester_json(s, batch_start_year=None, on_date=None):
     if not s: return None
+    by=s.get('batch_start_year') if s.get('batch_start_year') is not None else batch_start_year
+    sn=s.get('sem_no')
+    cur=None
+    if by is not None:
+        try: cur=current_sem_for_batch(int(by), on_date=on_date)
+        except Exception: cur=None
+    status=None
+    if by is not None and sn is not None and cur is not None:
+        sn_i=int(sn)
+        status='current' if sn_i==int(cur) else ('upcoming' if sn_i>int(cur) else 'completed')
+    elif int(s.get('is_current') or 0)==1:
+        status='current'
     return {'id':s.get('id'),'label':s.get('label'),'start_date':s.get('start_date') or '',
-            'end_date':s.get('end_date') or '','is_current':int(s.get('is_current') or 0)}
+            'end_date':s.get('end_date') or '','is_current':int(s.get('is_current') or 0),
+            'batch_start_year':by,'sem_no':sn,'is_auto':int(s.get('is_auto') or 0) if s.get('is_auto') is not None else None,
+            'batch_label':batch_label(by) if by is not None else '','status':status}
 
 def _semester_display_window(s, class_name=None):
     d1,d2=_semester_window(s, class_name)
@@ -4727,65 +5001,157 @@ def admin_semesters_page():
 @app.route('/api/semesters')
 @login_required
 def api_semesters():
-    rows=[_semester_json(s) for s in _semester_rows()]
-    cur=next((s['id'] for s in rows if s['is_current']), (rows[0]['id'] if rows else None))
+    batch_raw=request.args.get('batch_start_year')
+    class_name=request.args.get('class') or request.args.get('class_name')
+    info=parse_cohort_class(class_name) if class_name else None
+    by=None
+    if batch_raw not in (None,''):
+        try: by=int(batch_raw)
+        except Exception: by=None
+    if by is None and info: by=info.get('batch_start_year')
+    role=session.get('role') or 'staff'
+    today=_today_ist_str()
+    if by is not None:
+        ensure_batch_semesters(by, actor=session.get('username') or 'system')
+        sem_rows=_semester_rows(batch_start_year=by, include_legacy=False)
+        visible, cur_no = visible_sem_nos(role, by, on_date=today)
+        rows=[_semester_json(s,batch_start_year=by,on_date=today) for s in sem_rows if int(s.get('sem_no') or 0) in set(visible)]
+        cur_id=next((r['id'] for r in rows if int(r.get('sem_no') or 0)==int(cur_no)), (rows[0]['id'] if rows else None))
+        return jsonify({'ok':True,'batch_start_year':by,'batch_label':batch_label(by),'current_sem_no':cur_no,'current_id':cur_id,'semesters':rows})
+    rows=[_semester_json(s,on_date=today) for s in _semester_rows()]
+    cur=next((s['id'] for s in rows if s.get('is_current') or s.get('status')=='current'), (rows[0]['id'] if rows else None))
     return jsonify({'ok':True,'semesters':rows,'current_id':cur})
 
 @app.route('/api/admin/semesters', methods=['GET'])
 @admin_required
 def api_admin_semesters_list():
-    rows=[_semester_json(s) for s in _semester_rows()]
-    return jsonify({'ok':True,'semesters':rows,'current_id':next((s['id'] for s in rows if s['is_current']), None)})
+    batch_raw=request.args.get('batch_start_year')
+    by=None
+    if batch_raw not in (None,''):
+        try: by=int(batch_raw)
+        except Exception: by=None
+    today=_today_ist_str()
+    if by is not None:
+        ensure_batch_semesters(by, actor=session.get('username') or 'admin')
+        sem_rows=_semester_rows(batch_start_year=by, include_legacy=False)
+        _,cur_no=visible_sem_nos('admin',by,on_date=today)
+        rows=[_semester_json(s,batch_start_year=by,on_date=today) for s in sem_rows]
+        cur_id=next((r['id'] for r in rows if int(r.get('sem_no') or 0)==int(cur_no)), None)
+        return jsonify({'ok':True,'batch_start_year':by,'batch_label':batch_label(by),'current_sem_no':cur_no,'current_id':cur_id,'semesters':rows,'batches':BATCH_REGISTRY})
+    rows=[_semester_json(s,on_date=today) for s in _semester_rows()]
+    return jsonify({'ok':True,'semesters':rows,'current_id':next((s['id'] for s in rows if s.get('is_current') or s.get('status')=='current'), None),'batches':BATCH_REGISTRY})
 
 @app.route('/api/admin/semesters', methods=['POST'])
 @admin_required
 def api_admin_semesters_save():
     data=request.get_json(silent=True) or request.form.to_dict()
+    who=session.get('display_name') or session.get('username') or 'admin'
+    now=datetime.datetime.utcnow().isoformat()
+    # batch-sem save
+    if data.get('batch_start_year') not in (None,'') and data.get('sem_no') not in (None,''):
+        try:
+            by=int(data.get('batch_start_year')); sn=int(data.get('sem_no'))
+        except Exception:
+            return jsonify({'ok':False,'error':'Invalid batch/sem'}),400
+        if sn<1 or sn>8: return jsonify({'ok':False,'error':'sem_no must be 1..8'}),400
+        start=(data.get('start_date') or '').strip(); end=(data.get('end_date') or '').strip()
+        if not start or not end: return jsonify({'ok':False,'error':'Start/end date required'}),400
+        if not _parse_iso_date(start) or not _parse_iso_date(end): return jsonify({'ok':False,'error':'Invalid date'}),400
+        if _parse_iso_date(start)>_parse_iso_date(end): return jsonify({'ok':False,'error':'Start date cannot be after end date'}),400
+        label=_norm(data.get('label')) or batch_sem_label(by,sn)
+        ensure_batch_semesters(by, actor=who)
+        conn=_db(); c=conn.cursor()
+        try:
+            c.execute("""INSERT INTO semesters(label,start_date,end_date,is_current,created_by,created_at,updated_at,batch_start_year,sem_no,is_auto)
+                         VALUES (?,?,?,0,?,?,?, ?,?,0)
+                         ON CONFLICT(batch_start_year,sem_no) WHERE batch_start_year IS NOT NULL AND sem_no IS NOT NULL
+                         DO UPDATE SET label=excluded.label,start_date=excluded.start_date,end_date=excluded.end_date,updated_at=excluded.updated_at,is_auto=0""",
+                      (label,start,end,who,now,now,by,sn))
+            conn.commit()
+            c.execute("SELECT id FROM semesters WHERE batch_start_year=? AND sem_no=?",(by,sn))
+            row=c.fetchone(); sid=row[0] if row else None
+        finally:
+            conn.close()
+        audit_log('semesters',str(sid),'save',None,{'batch_start_year':by,'sem_no':sn,'label':label,'start_date':start,'end_date':end},details='Admin saved batch semester')
+        sem_rows=_semester_rows(batch_start_year=by, include_legacy=False)
+        today=_today_ist_str(); _,cur_no=visible_sem_nos('admin',by,on_date=today)
+        rows=[_semester_json(s,batch_start_year=by,on_date=today) for s in sem_rows]
+        cur_id=next((r['id'] for r in rows if int(r.get('sem_no') or 0)==int(cur_no)), None)
+        return jsonify({'ok':True,'id':sid,'batch_start_year':by,'batch_label':batch_label(by),'current_sem_no':cur_no,'current_id':cur_id,'semesters':rows})
+    # legacy global save (compat)
     label=_norm(data.get('label'))
-    start=(data.get('start_date') or '').strip()
-    end=(data.get('end_date') or '').strip()
+    start=(data.get('start_date') or '').strip(); end=(data.get('end_date') or '').strip()
     is_current=str(data.get('is_current') or '').lower() in ('1','true','on','yes')
     if not label: return jsonify({'ok':False,'error':'Semester label is required'}),400
     if start and not _parse_iso_date(start): return jsonify({'ok':False,'error':'Invalid start date'}),400
     if end and not _parse_iso_date(end): return jsonify({'ok':False,'error':'Invalid end date'}),400
-    if start and end and _parse_iso_date(start)>_parse_iso_date(end):
-        return jsonify({'ok':False,'error':'Start date cannot be after end date'}),400
-    who=session.get('display_name') or session.get('username') or 'admin'
-    now=datetime.datetime.utcnow().isoformat()
+    if start and end and _parse_iso_date(start)>_parse_iso_date(end): return jsonify({'ok':False,'error':'Start date cannot be after end date'}),400
     conn=_db(); c=conn.cursor()
     sid=data.get('id')
     try: sid=int(sid) if sid not in (None,'','0') else None
     except Exception: sid=None
-    if is_current: c.execute('UPDATE semesters SET is_current=0')
+    if is_current: c.execute('UPDATE semesters SET is_current=0 WHERE batch_start_year IS NULL')
     if sid:
-        c.execute('UPDATE semesters SET label=?,start_date=?,end_date=?,is_current=?,updated_at=? WHERE id=?',
+        c.execute('UPDATE semesters SET label=?,start_date=?,end_date=?,is_current=?,updated_at=? WHERE id=? AND batch_start_year IS NULL',
                   (label,start,end,1 if is_current else 0,now,sid))
     else:
-        c.execute('INSERT INTO semesters (label,start_date,end_date,is_current,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?)',
+        c.execute('INSERT INTO semesters (label,start_date,end_date,is_current,created_by,created_at,updated_at,batch_start_year,sem_no,is_auto) VALUES (?,?,?,?,?,?,?,NULL,NULL,0)',
                   (label,start,end,1 if is_current else 0,who,now,now))
         sid=c.lastrowid
     if not is_current:
-        c.execute('SELECT COUNT(*) FROM semesters WHERE is_current=1'); has=int(c.fetchone()[0] or 0)
+        c.execute('SELECT COUNT(*) FROM semesters WHERE is_current=1 AND batch_start_year IS NULL'); has=int(c.fetchone()[0] or 0)
         if not has: c.execute('UPDATE semesters SET is_current=1 WHERE id=?',(sid,))
     conn.commit(); conn.close()
     _sync_current_semester_settings()
-    audit_log('semesters',str(sid),'save',None,{'label':label,'start_date':start,'end_date':end,'is_current':is_current},details='Admin saved semester')
+    audit_log('semesters',str(sid),'save',None,{'label':label,'start_date':start,'end_date':end,'is_current':is_current},details='Admin saved legacy semester')
     return jsonify({'ok':True,'id':sid,'semesters':[ _semester_json(s) for s in _semester_rows() ]})
+
+@app.route('/api/admin/semesters/reset_defaults', methods=['POST'])
+@admin_required
+def api_admin_semesters_reset_defaults():
+    data=request.get_json(silent=True) or {}
+    try: by=int(data.get('batch_start_year'))
+    except Exception: return jsonify({'ok':False,'error':'batch_start_year required'}),400
+    sem_no=data.get('sem_no')
+    who=session.get('display_name') or session.get('username') or 'admin'; now=_now_iso()
+    conn=_db(); c=conn.cursor()
+    try:
+        targets=[int(sem_no)] if sem_no not in (None,'') else list(range(1,9))
+        for sn in targets:
+            start,end=default_batch_sem_dates(by,sn); label=batch_sem_label(by,sn)
+            c.execute("""INSERT INTO semesters(label,start_date,end_date,is_current,created_by,created_at,updated_at,batch_start_year,sem_no,is_auto)
+                         VALUES (?,?,?,0,?,?,?, ?,?,1)
+                         ON CONFLICT(batch_start_year,sem_no) WHERE batch_start_year IS NOT NULL AND sem_no IS NOT NULL
+                         DO UPDATE SET label=excluded.label,start_date=excluded.start_date,end_date=excluded.end_date,updated_at=excluded.updated_at,is_auto=1""",
+                      (label,start,end,who,now,now,by,sn))
+        conn.commit()
+    finally:
+        conn.close()
+    audit_log('semesters',f'{by}','reset_defaults',None,{'batch_start_year':by,'sem_no':sem_no},details='Admin reset batch semester defaults')
+    today=_today_ist_str(); ensure_batch_semesters(by,actor=who)
+    rows=[_semester_json(s,batch_start_year=by,on_date=today) for s in _semester_rows(batch_start_year=by,include_legacy=False)]
+    _,cur_no=visible_sem_nos('admin',by,on_date=today)
+    cur_id=next((r['id'] for r in rows if int(r.get('sem_no') or 0)==int(cur_no)), None)
+    return jsonify({'ok':True,'batch_start_year':by,'batch_label':batch_label(by),'current_sem_no':cur_no,'current_id':cur_id,'semesters':rows})
 
 @app.route('/api/admin/semesters/<int:sid>', methods=['DELETE'])
 @admin_required
 def api_admin_semesters_delete(sid):
     conn=_db(); c=conn.cursor()
-    c.execute('SELECT is_current FROM semesters WHERE id=?',(sid,)); row=c.fetchone()
+    c.execute('SELECT is_current,batch_start_year,sem_no FROM semesters WHERE id=?',(sid,)); row=c.fetchone()
     if not row: conn.close(); return jsonify({'ok':False,'error':'Semester not found'}),404
-    was_current=int(row[0] or 0)
+    was_current=int(row[0] or 0); by=row[1]; sn=row[2]
+    # don't delete batch-sem rows; reset to default instead
+    if by is not None and sn is not None:
+        conn.close()
+        return api_admin_semesters_reset_defaults() if False else jsonify({'ok':False,'error':'Batch semester rows cannot be deleted; use Reset to default.'}),400
     c.execute('DELETE FROM semesters WHERE id=?',(sid,))
     if was_current:
-        c.execute("SELECT id FROM semesters ORDER BY COALESCE(start_date,'') DESC, id DESC LIMIT 1"); nxt=c.fetchone()
+        c.execute("SELECT id FROM semesters WHERE batch_start_year IS NULL ORDER BY COALESCE(start_date,'') DESC, id DESC LIMIT 1"); nxt=c.fetchone()
         if nxt: c.execute('UPDATE semesters SET is_current=1 WHERE id=?',(nxt[0],))
     conn.commit(); conn.close()
     _sync_current_semester_settings()
-    audit_log('semesters',str(sid),'delete',None,None,details='Admin deleted semester')
+    audit_log('semesters',str(sid),'delete',None,None,details='Admin deleted legacy semester')
     return jsonify({'ok':True,'semesters':[ _semester_json(s) for s in _semester_rows() ]})
 
 @app.route('/admin/calendar')
