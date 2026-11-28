@@ -18,7 +18,7 @@ import urllib.error
 from urllib.parse import urlencode
 from email.mime.text import MIMEText
 from functools import wraps
-from flask import Flask, render_template, request, jsonify, send_file, abort, redirect, url_for, session, flash
+from flask import Flask, render_template, request, jsonify, send_file, abort, redirect, url_for, session, flash, make_response
 from werkzeug.utils import secure_filename
 from markupsafe import Markup
 from model import train_model_background, extract_embedding_for_image, load_model_if_exists, MODEL_PATH, predict_with_model, detect_faces_bboxes, crop_face_and_embed, face_capabilities
