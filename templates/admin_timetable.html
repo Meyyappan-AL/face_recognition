@@ -195,7 +195,7 @@
     <div class="card erp-card p-3 mt-3">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
         <h6 class="erp-section-title mb-0">Version history</h6>
-        <div class="erp-muted small">Restoring creates a new version effective from the selected date.</div>
+        <div class="erp-muted small">Delete permanently removes a version from DB. Restoring creates a new version effective from the selected date.</div>
       </div>
       <div class="table-responsive">
         <table id="historyTable" class="table table-sm tt-history align-middle mb-0">
@@ -396,7 +396,7 @@
         <td class="text-nowrap">
           <button class="btn btn-outline-primary btn-sm" data-load-version="${attr(v.id)}" type="button">Load</button>
           <button class="btn btn-outline-secondary btn-sm" data-restore-version="${attr(v.id)}" type="button">Restore</button>
-          <button class="btn btn-outline-${v.hidden?'success':'warning'} btn-sm" data-hide-version="${attr(v.id)}" data-hidden="${v.hidden?'1':'0'}" type="button">${v.hidden?'Unhide':'Hide'}</button>
+          <button class="btn btn-outline-danger btn-sm" data-delete-version="${attr(v.id)}" data-vno="${attr(v.version_no)}" type="button">Delete</button>
         </td>
       </tr>`).join('');
   }
@@ -625,14 +625,18 @@
     }
     const restore=e.target.closest('[data-restore-version]');
     if(restore){ restoreVersion(restore.dataset.restoreVersion); return; }
-    const hb=e.target.closest('[data-hide-version]');
-    if(hb){
-      const id=Number(hb.dataset.hideVersion); const hidden=hb.dataset.hidden==='1';
+    const del=e.target.closest('[data-delete-version]');
+    if(del){
+      const id=Number(del.dataset.deleteVersion); const vno=del.dataset.vno||id;
+      if(!confirm(`Delete timetable v${vno} for ${state.class}? This permanently removes it from DB.`)) return;
       try{
-        await erp.fetchJSON('/api/admin/timetable/versions/'+id+'/hide',{method:'POST',body:{hidden:!hidden}});
-        await loadVersions(state.class,state.batch,state.semNo); renderHistory();
-        erp.toast((hidden?'Unhid':'Hid')+' version','success');
-      }catch(err){ erp.toast(err.message||'Update failed','danger'); }
+        const r=await erp.fetchJSON('/api/admin/timetable/versions/'+id+'/delete',{method:'POST',body:{}});
+        erp.toast('Deleted timetable version v'+vno,'success');
+        await loadVersions(state.class,state.batch,state.semNo);
+        const next=r.next_version_id || (state.versions[0] && state.versions[0].id);
+        if(next) await loadVersion(next);
+        else { state.versionId=null; state.data=emptyTimetable(state.class); state.dirty=false; renderHistory(); renderEditor(); msg('Version deleted. No versions left for this class/sem.','warning'); }
+      }catch(err){ erp.toast(err.message||'Delete failed','danger'); }
     }
   });
 

@@ -2116,21 +2116,41 @@ def api_admin_timetable_version_restore(version_id):
 @app.route('/api/admin/timetable/versions/<int:version_id>/hide', methods=['POST'])
 @admin_required
 def api_admin_timetable_version_hide(version_id):
-    data=request.get_json(silent=True) or {}
-    hide=bool(data.get('hidden', True))
+    return api_admin_timetable_version_delete(version_id)
+
+@app.route('/api/admin/timetable/versions/<int:version_id>/delete', methods=['POST'])
+@admin_required
+def api_admin_timetable_version_delete(version_id):
     conn=_db(); c=conn.cursor()
     try:
-        c.execute("SELECT id,class_name,version_no FROM timetable_versions WHERE id=?",(version_id,))
+        c.execute("SELECT id,class_name,semester_id,version_no,reference_path,is_active FROM timetable_versions WHERE id=?",(version_id,))
         row=c.fetchone()
         if not row: return jsonify({'ok':False,'error':'Timetable version not found.'}), 404
-        now=_now_iso(); who=session.get('username') or session.get('display_name') or 'admin'
-        c.execute("UPDATE timetable_versions SET hidden=?, hidden_at=?, hidden_by=?, updated_at=? WHERE id=?",
-                  (1 if hide else 0, now if hide else None, who if hide else None, now, version_id))
+        vid, cls, sem_id, vno, ref_path = int(row[0]), row[1], row[2], int(row[3] or 0), (row[4] or '')
+        c.execute("DELETE FROM student_electives WHERE timetable_version_id=?", (vid,))
+        c.execute("DELETE FROM class_elective_offerings WHERE timetable_version_id=?", (vid,))
+        c.execute("DELETE FROM timetable_versions WHERE id=?", (vid,))
+        next_id=None
+        if sem_id is not None:
+            c.execute("SELECT id FROM timetable_versions WHERE upper(class_name)=upper(?) AND semester_id=? ORDER BY effective_from DESC, version_no DESC, id DESC LIMIT 1", (cls, sem_id))
+            nr=c.fetchone(); next_id=int(nr[0]) if nr else None
+            c.execute("UPDATE timetable_versions SET is_active=0 WHERE upper(class_name)=upper(?) AND semester_id=?", (cls, sem_id))
+            if next_id is not None:
+                c.execute("UPDATE timetable_versions SET is_active=1 WHERE id=?", (next_id,))
         conn.commit(); conn.close()
-        audit_log('timetable', row[1], 'version_hide' if hide else 'version_unhide', str(version_id), {'hidden':hide}, details=f'Admin {"hid" if hide else "unhid"} timetable version v{row[2]}')
-        return jsonify({'ok':True,'hidden':1 if hide else 0})
+        if ref_path:
+            try:
+                conn2=_db(); c2=conn2.cursor(); c2.execute("SELECT 1 FROM timetable_versions WHERE reference_path=? LIMIT 1", (ref_path,)); still=c2.fetchone(); conn2.close()
+                if not still:
+                    ref_abs=os.path.abspath(os.path.join(APP_DIR, ref_path)); base=os.path.abspath(TIMETABLE_REF_DIR)
+                    if (ref_abs==base or ref_abs.startswith(base+os.sep)) and os.path.exists(ref_abs):
+                        os.remove(ref_abs)
+            except Exception:
+                pass
+        audit_log('timetable', cls, 'version_delete', str(vid), {'version_no':vno,'semester_id':sem_id}, details=f'Admin deleted timetable version v{vno}')
+        return jsonify({'ok':True,'deleted':True,'version_id':vid,'class':cls,'semester_id':sem_id,'next_version_id':next_id})
     except Exception as e:
-        try: conn.close()
+        try: conn.rollback(); conn.close()
         except Exception: pass
         return jsonify({'ok':False,'error':str(e)}), 400
 
