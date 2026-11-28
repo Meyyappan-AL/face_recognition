@@ -197,7 +197,7 @@
 
   function updateExportLink(){
     const a=$('exportLink'); if(!currentClass||!currentVersion){ a.classList.add('disabled'); a.href='#'; return; }
-    a.classList.remove('disabled'); a.href='/api/admin/electives/export?class='+encodeURIComponent(currentClass)+'&version_id='+encodeURIComponent(currentVersion.id)+'&semester_id='+encodeURIComponent(currentSem()||'');
+    a.classList.remove('disabled'); a.href='/api/admin/electives/export?class='+encodeURIComponent(currentClass)+'&version_id='+encodeURIComponent(currentVersion.id)+'&batch_start_year='+encodeURIComponent(currentBatch()||'')+'&sem_no='+encodeURIComponent(currentSem()||'');
   }
 
   function renderAudit(logs){
@@ -255,7 +255,7 @@
     });
     $('saveBtn').disabled=true; msg('Saving mappings...');
     try{
-      const d=await erp.fetchJSON('/api/admin/electives',{method:'POST',body:{class_name:currentClass,semester_id:currentSem(),version_id:Number(currentVersion.id),mappings}});
+      const d=await erp.fetchJSON('/api/admin/electives',{method:'POST',body:{class_name:currentClass,batch_start_year:currentBatch(),sem_no:currentSem(),version_id:Number(currentVersion.id),mappings}});
       setDirty(false); msg(`Saved ${d.saved||0} mappings and cleared ${d.cleared||0} for v${currentVersion.version_no}.`,'success'); erp.toast('Elective mappings saved','success');
       await loadClass();
     }catch(e){
@@ -269,7 +269,7 @@
     if(!confirm('Copy missing mappings into v'+currentVersion.version_no+' from the previous version or legacy mappings?')) return;
     $('carryBtn').disabled=true; msg('Carrying mappings forward...');
     try{
-      const d=await erp.fetchJSON('/api/admin/electives/carry-forward',{method:'POST',body:{class_name:currentClass,semester_id:currentSem(),version_id:Number(currentVersion.id)}});
+      const d=await erp.fetchJSON('/api/admin/electives/carry-forward',{method:'POST',body:{class_name:currentClass,batch_start_year:currentBatch(),sem_no:currentSem(),version_id:Number(currentVersion.id)}});
       msg(`Carried ${d.copied||0} mappings${d.invalid?', '+d.invalid+' invalid':''}${d.skipped?', '+d.skipped+' skipped':''}.`,'success');
       await loadClass();
     }catch(e){ msg('Carry forward failed: '+esc(e.message||e),'danger'); }
@@ -278,7 +278,7 @@
 
   async function importCsv(file){
     if(!file||!currentClass||!currentVersion) return;
-    const fd=new FormData(); fd.append('class_name',currentClass); fd.append('semester_id',currentSem()||''); fd.append('version_id',currentVersion.id); fd.append('file',file);
+    const fd=new FormData(); fd.append('class_name',currentClass); fd.append('batch_start_year',currentBatch()||''); fd.append('sem_no',currentSem()||''); fd.append('version_id',currentVersion.id); fd.append('file',file);
     msg('Importing '+esc(file.name)+'...');
     try{
       const d=await erp.fetchJSON('/api/admin/electives/import',{method:'POST',body:fd});
