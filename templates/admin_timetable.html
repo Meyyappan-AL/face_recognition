@@ -200,7 +200,7 @@
       <div class="table-responsive">
         <table id="historyTable" class="table table-sm tt-history align-middle mb-0">
           <thead><tr><th>Ver</th><th>Effective</th><th>Status</th><th>Reference</th><th>Notes</th><th>Saved by</th><th></th></tr></thead>
-          <tbody id="versionRows"><tr><td colspan="7" class="text-muted">No versions loaded.</td></tr></tbody>
+          <tbody id="versionRows"><tr><td colspan="7" class="text-muted">Select class/batch/sem to load versions.</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -466,6 +466,7 @@
       await loadVersions(cls,state.batch,state.semNo);
       const pick=state.versions.find(v=>v.status==='current')||state.versions[0];
       if(pick){ await loadVersion(pick.id); return; }
+      if(state.versions.length){ await loadVersion(state.versions[0].id); return; }
       try{ await loadLegacy(cls); }
       catch(le){ state.data=emptyTimetable(cls); state.versionId=null; state.dirty=false; renderHistory(); renderEditor(); msg('No timetable version for '+cls+' in selected batch/sem. Create or import one.','warning'); }
     }catch(e){ state.data=emptyTimetable(cls); state.versionId=null; state.versions=[]; state.dirty=false; renderHistory(); renderEditor(); msg(e.message||'Could not load timetable.','danger'); erp.toast(e.message||'Load failed','danger'); }
