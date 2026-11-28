@@ -2108,7 +2108,7 @@ def api_admin_timetable_version_restore(version_id):
     if not allowed: return jsonify({'ok':False,'error':reason}), 403
     notes=((data.get('notes') or '').strip() or f'Restored from version {version_no}').strip()
     res=_save_timetable_version(cls,sem_id,eff,payload,reference_path=(ref_path or ''),
-                                reference_name=(ref_name or ''),notes=notes)
+                                reference_name=(ref_name or ''),notes=notes, force_new=True)
     if res.get('ok'):
         res['staff_sync']=sync_staff_from_timetables(reset_passwords=False)
         audit_log('timetable',cls,'version_restore',None,{'version_id':version_id,'new_version_id':res.get('version_id')},
@@ -2131,7 +2131,10 @@ def api_admin_timetable_version_delete(version_id):
         if not row: return jsonify({'ok':False,'error':'Timetable version not found.'}), 404
         vid, cls, sem_id, vno, ref_path = int(row[0]), row[1], row[2], int(row[3] or 0), (row[4] or '')
         c.execute("DELETE FROM student_electives WHERE timetable_version_id=?", (vid,))
-        c.execute("DELETE FROM class_elective_offerings WHERE timetable_version_id=?", (vid,))
+        try: c.execute("DELETE FROM elective_offerings WHERE timetable_version_id=?", (vid,))
+        except Exception: pass
+        try: c.execute("DELETE FROM class_elective_offerings WHERE timetable_version_id=?", (vid,))
+        except Exception: pass
         c.execute("DELETE FROM timetable_versions WHERE id=?", (vid,))
         next_id=None
         if sem_id is not None:

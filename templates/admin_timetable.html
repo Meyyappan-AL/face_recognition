@@ -521,14 +521,16 @@
   async function restoreVersion(id){
     const v=state.versions.find(x=>Number(x.id)===Number(id));
     if(!v) return;
-    if(!confirm(`Restore v${v.version_no} as a new version effective ${$('effectiveFrom').value}?`)) return;
+    if(!confirm(`Restore v${v.version_no} as a new version effective ${$('effectiveFrom').value}? This becomes the current version.`)) return;
     try{
       const d=await erp.fetchJSON('/api/admin/timetable/versions/'+encodeURIComponent(id)+'/restore',{method:'POST',body:{
         effective_from:$('effectiveFrom').value,batch_start_year:state.batch,sem_no:state.semNo,notes:'Restored v'+v.version_no
       }});
       await loadVersions(state.class,state.batch,state.semNo);
-      await loadVersion(d.version_id);
-      msg('Restored v'+v.version_no+' as v'+d.version_no+'.','success');
+      if(d.version_id) await loadVersion(d.version_id);
+      renderHistory();
+      erp.toast('Restored as current version v'+d.version_no,'success');
+      msg('Restored v'+v.version_no+' as new current version v'+d.version_no+'.','success');
     }catch(e){ msg(e.message||'Restore failed.','danger'); }
   }
 
