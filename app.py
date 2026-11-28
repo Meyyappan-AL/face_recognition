@@ -1400,12 +1400,21 @@ def admin_students_page():
                          'student_role':r[16] or '','image_count':img_count,'has_profile_photo':has_profile})
     return render_template('students_list.html', students=students)
 
-def _admin_student_attendance_data(sid, semester_id='', date_from='', date_to='', status='', period=''):
+def _admin_student_attendance_data(sid, semester_id='', date_from='', date_to='', status='', period='', sem_no=None, batch_start_year=None):
     conn=_db(); c=conn.cursor(); _ensure_student_year_columns(c); _ensure_student_role_column(c)
     row=c.execute('SELECT id,name,class,section,reg_no,batch_year,study_year,gender,active,student_role FROM students WHERE id=?',(sid,)).fetchone()
     if not row: conn.close(); return None,[],{},{}
     student={'id':row[0],'name':row[1],'class':row[2] or '','section':row[3] or '','reg_no':row[4] or '','batch_year':row[5] or '','study_year':row[6] or '','gender':row[7] or '','active':int(row[8] or 0),'student_role':row[9] or ''}
     sem=_semester_by_id(semester_id) if semester_id else None
+    if not sem and sem_no not in (None,'') and batch_start_year not in (None,''):
+        try: sem=_batch_semester_row(int(batch_start_year), int(sem_no))
+        except Exception: sem=None
+    if not sem and sem_no not in (None,''):
+        info=parse_cohort_class(student.get('class') or '')
+        by=info.get('batch_start_year') if info else None
+        try:
+            if by is not None: sem=_batch_semester_row(int(by), int(sem_no))
+        except Exception: sem=None
     if sem and not date_from and not date_to:
         wf,wt=_semester_window(sem,student['class']); date_from=wf.isoformat(); date_to=wt.isoformat()
     where=['e.student_id=?']; params=[sid]
@@ -1438,7 +1447,8 @@ def _admin_student_attendance_data(sid, semester_id='', date_from='', date_to=''
 @admin_required
 def admin_student_attendance(sid):
     semester_id=_norm(request.args.get('semester_id')); date_from=_norm(request.args.get('from')); date_to=_norm(request.args.get('to')); status=_norm(request.args.get('status')); period=_norm(request.args.get('period'))
-    student,details,summary,filters=_admin_student_attendance_data(sid,semester_id,date_from,date_to,status,period)
+    sem_no=_norm(request.args.get('sem_no')); batch_start_year=_norm(request.args.get('batch_start_year'))
+    student,details,summary,filters=_admin_student_attendance_data(sid,semester_id,date_from,date_to,status,period,sem_no=sem_no,batch_start_year=batch_start_year)
     if not student: abort(404)
     cls=student.get('class') or ''
     info=parse_cohort_class(cls); by=info.get('batch_start_year') if info else None
@@ -1453,7 +1463,8 @@ def admin_student_attendance(sid):
 @admin_required
 def admin_student_attendance_export(sid):
     semester_id=_norm(request.args.get('semester_id')); date_from=_norm(request.args.get('from')); date_to=_norm(request.args.get('to')); status=_norm(request.args.get('status')); period=_norm(request.args.get('period'))
-    student,details,_summary,_filters=_admin_student_attendance_data(sid,semester_id,date_from,date_to,status,period)
+    sem_no=_norm(request.args.get('sem_no')); batch_start_year=_norm(request.args.get('batch_start_year'))
+    student,details,_summary,_filters=_admin_student_attendance_data(sid,semester_id,date_from,date_to,status,period,sem_no=sem_no,batch_start_year=batch_start_year)
     if not student: abort(404)
     output=io.StringIO(); output.write('Date,Period,Class,Subject,Status,Source,MarkedBy,Updated,Submitted\n')
     for d in details:
