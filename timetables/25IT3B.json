@@ -1,0 +1,454 @@
+{
+  "breaks": [
+    {
+      "after_period": 2,
+      "end": "10:50",
+      "start": "10:35"
+    },
+    {
+      "after_period": 6,
+      "end": "15:20",
+      "start": "15:10"
+    }
+  ],
+  "class": "25IT3B",
+  "class_advisor": {
+    "initials": "MV",
+    "is_hod": false,
+    "name": "Ms.M.Vimala"
+  },
+  "hall": "201",
+  "lunch": {
+    "end": "13:20",
+    "start": "12:30"
+  },
+  "schedule": {
+    "FRI": [
+      {
+        "period": 1,
+        "subject": "DBMS",
+        "staff": [
+          "RS"
+        ],
+        "display": "DBMS (RS)"
+      },
+      {
+        "period": 2,
+        "subject": "FDS",
+        "staff": [
+          "TK"
+        ],
+        "display": "FDS (TK)"
+      },
+      {
+        "period": 3,
+        "subject": "DM",
+        "staff": [
+          "KR"
+        ],
+        "display": "DM (KR)"
+      },
+      {
+        "period": 4,
+        "subject": "TC",
+        "staff": [
+          "RS"
+        ],
+        "display": "TC (RS)"
+      },
+      {
+        "period": 5,
+        "subject": "PD-1",
+        "staff": [
+          "SK"
+        ],
+        "display": "PD-1 (SK)"
+      },
+      {
+        "period": 6,
+        "subject": "PD-1",
+        "staff": [
+          "SK"
+        ],
+        "display": "PD-1 (SK)"
+      },
+      {
+        "period": 7,
+        "subject": "SE",
+        "staff": [
+          "RMW"
+        ],
+        "display": "SE (RMW)"
+      }
+    ],
+    "MON": [
+      {
+        "period": 1,
+        "subject": "DBMS",
+        "staff": [
+          "RS"
+        ],
+        "display": "DBMS (RS)"
+      },
+      {
+        "period": 2,
+        "subject": "JP",
+        "staff": [
+          "VL"
+        ],
+        "display": "JP (VL)"
+      },
+      {
+        "period": 3,
+        "subject": "DM",
+        "staff": [
+          "KR"
+        ],
+        "display": "DM (KR)"
+      },
+      {
+        "period": 4,
+        "subject": "SE",
+        "staff": [
+          "RMW"
+        ],
+        "display": "SE (RMW)"
+      },
+      {
+        "period": 5,
+        "subject": "DBMS LAB",
+        "staff": [
+          "RS",
+          "TK",
+          "VL"
+        ],
+        "display": "DBMS LAB (RS, TK, VL)"
+      },
+      {
+        "period": 6,
+        "subject": "DBMS LAB",
+        "staff": [
+          "RS",
+          "TK",
+          "VL"
+        ],
+        "display": "DBMS LAB (RS, TK, VL)"
+      },
+      {
+        "period": 7,
+        "subject": "DBMS LAB",
+        "staff": [
+          "RS",
+          "TK",
+          "VL"
+        ],
+        "display": "DBMS LAB (RS, TK, VL)"
+      }
+    ],
+    "SAT": [
+      {
+        "period": 1,
+        "subject": "DM",
+        "staff": [
+          "KR"
+        ],
+        "display": "DM (KR)"
+      },
+      {
+        "period": 2,
+        "subject": "FDS",
+        "staff": [
+          "TK"
+        ],
+        "display": "FDS (TK)"
+      },
+      {
+        "period": 3,
+        "subject": "JP",
+        "staff": [
+          "VL"
+        ],
+        "display": "JP (VL)"
+      },
+      {
+        "period": 4,
+        "subject": "SE",
+        "staff": [
+          "RMW"
+        ],
+        "display": "SE (RMW)"
+      },
+      {
+        "period": 5,
+        "subject": "LIBRARY",
+        "staff": [
+          "MV"
+        ],
+        "display": "LIBRARY (MV)"
+      },
+      {
+        "period": 6,
+        "subject": "PE",
+        "staff": [
+          "KG"
+        ],
+        "display": "PE (KG)"
+      },
+      {
+        "period": 7,
+        "subject": "COUN",
+        "staff": [
+          "MV",
+          "RS",
+          "RMW"
+        ],
+        "display": "COUN (MV, RS, RMW)"
+      }
+    ],
+    "SUN": [],
+    "THU": [
+      {
+        "period": 1,
+        "subject": "JP",
+        "staff": [
+          "VL"
+        ],
+        "display": "JP (VL)"
+      },
+      {
+        "period": 2,
+        "subject": "DBMS",
+        "staff": [
+          "RS"
+        ],
+        "display": "DBMS (RS)"
+      },
+      {
+        "period": 3,
+        "subject": "PD-1",
+        "staff": [
+          "KSS"
+        ],
+        "display": "PD-1 (KSS)"
+      },
+      {
+        "period": 4,
+        "subject": "PD-1",
+        "staff": [
+          "KSS"
+        ],
+        "display": "PD-1 (KSS)"
+      },
+      {
+        "period": 5,
+        "subject": "DM",
+        "staff": [
+          "KR"
+        ],
+        "display": "DM (KR)"
+      },
+      {
+        "period": 6,
+        "subject": "JP",
+        "staff": [
+          "VL"
+        ],
+        "display": "JP (VL)"
+      },
+      {
+        "period": 7,
+        "subject": "FDS",
+        "staff": [
+          "TK"
+        ],
+        "display": "FDS (TK)"
+      }
+    ],
+    "TUE": [
+      {
+        "period": 1,
+        "subject": "FDS",
+        "staff": [
+          "TK"
+        ],
+        "display": "FDS (TK)"
+      },
+      {
+        "period": 2,
+        "subject": "DM",
+        "staff": [
+          "KR"
+        ],
+        "display": "DM (KR)"
+      },
+      {
+        "period": 3,
+        "subject": "JP",
+        "staff": [
+          "VL"
+        ],
+        "display": "JP (VL)"
+      },
+      {
+        "period": 4,
+        "subject": "DBMS",
+        "staff": [
+          "RS"
+        ],
+        "display": "DBMS (RS)"
+      },
+      {
+        "period": 5,
+        "subject": "TC",
+        "staff": [
+          "VL"
+        ],
+        "display": "TC (VL)"
+      },
+      {
+        "period": 6,
+        "subject": "SE",
+        "staff": [
+          "RMW"
+        ],
+        "display": "SE (RMW)"
+      },
+      {
+        "period": 7,
+        "subject": "TC",
+        "staff": [
+          "DR"
+        ],
+        "display": "TC (DR)"
+      }
+    ],
+    "WED": [
+      {
+        "period": 1,
+        "subject": "PD-1",
+        "staff": [
+          "RS"
+        ],
+        "display": "PD-1 (RS)"
+      },
+      {
+        "period": 2,
+        "subject": "JP LAB",
+        "staff": [
+          "VL",
+          "DS",
+          "KB"
+        ],
+        "display": "JP LAB (VL, DS, KB)"
+      },
+      {
+        "period": 3,
+        "subject": "JP LAB",
+        "staff": [
+          "VL",
+          "DS",
+          "KB"
+        ],
+        "display": "JP LAB (VL, DS, KB)"
+      },
+      {
+        "period": 4,
+        "subject": "JP LAB",
+        "staff": [
+          "VL",
+          "DS",
+          "KB"
+        ],
+        "display": "JP LAB (VL, DS, KB)"
+      },
+      {
+        "period": 5,
+        "subject": "DBMS",
+        "staff": [
+          "RS"
+        ],
+        "display": "DBMS (RS)"
+      },
+      {
+        "period": 6,
+        "subject": "FDS INBUILT LAB",
+        "staff": [
+          "TK",
+          "KG"
+        ],
+        "display": "FDS INBUILT LAB (TK, KG)"
+      },
+      {
+        "period": 7,
+        "subject": "FDS INBUILT LAB",
+        "staff": [
+          "TK",
+          "KG"
+        ],
+        "display": "FDS INBUILT LAB (TK, KG)"
+      }
+    ]
+  },
+  "slots": [
+    {
+      "period": 1,
+      "label": "Hour 1",
+      "start": "09:00",
+      "end": "09:45"
+    },
+    {
+      "period": 2,
+      "label": "Hour 2",
+      "start": "09:45",
+      "end": "10:35"
+    },
+    {
+      "period": 3,
+      "label": "Hour 3",
+      "start": "10:50",
+      "end": "11:40"
+    },
+    {
+      "period": 4,
+      "label": "Hour 4",
+      "start": "11:40",
+      "end": "12:30"
+    },
+    {
+      "period": 5,
+      "label": "Hour 5",
+      "start": "01:20",
+      "end": "02:15"
+    },
+    {
+      "period": 6,
+      "label": "Hour 6",
+      "start": "02:15",
+      "end": "03:10"
+    },
+    {
+      "period": 7,
+      "label": "Hour 7",
+      "start": "03:20",
+      "end": "04:15"
+    }
+  ],
+  "staff_directory": {
+    "DR": "DS/RMY",
+    "DS": "D.Suganya",
+    "KB": "K.Baby",
+    "KG": "K.Ganesh Kumar",
+    "KR": "K.Rathi",
+    "KSS": "KSS",
+    "KSSK": "K.S.Subhashri (KSS)",
+    "MV": "M.Vimala",
+    "RMW": "R.Maheshwari",
+    "RMY": "R.Mynavathi",
+    "RS": "R.Sangeetha",
+    "RSR": "R.Saranya (RS)",
+    "SK": "SK",
+    "SKS": "S.Kokilamani (SK)",
+    "TK": "T.Kokilavani",
+    "VL": "V.Leela"
+  }
+}

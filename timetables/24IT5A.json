@@ -1,76 +1,474 @@
-﻿{
+{
   "class": "24IT5A",
   "hall": "102",
-  "class_advisor": {"name": "Ms. K. Baby", "initials": "KB", "is_hod": false},
+  "class_advisor": {
+    "name": "Ms.K.Baby",
+    "initials": "KB",
+    "is_hod": false
+  },
   "slots": [
-    {"period": 1, "label": "Hour 1", "start": "09:00", "end": "09:45"},
-    {"period": 2, "label": "Hour 2", "start": "09:45", "end": "10:35"},
-    {"period": 3, "label": "Hour 3", "start": "10:50", "end": "11:40"},
-    {"period": 4, "label": "Hour 4", "start": "11:40", "end": "12:30"},
-    {"period": 5, "label": "Hour 5", "start": "13:20", "end": "14:15"},
-    {"period": 6, "label": "Hour 6", "start": "14:15", "end": "15:10"},
-    {"period": 7, "label": "Hour 7", "start": "15:20", "end": "16:15"}
+    {
+      "period": 1,
+      "label": "Hour 1",
+      "start": "9:00",
+      "end": "9:45"
+    },
+    {
+      "period": 2,
+      "label": "Hour 2",
+      "start": "9:45",
+      "end": "10:35"
+    },
+    {
+      "period": 3,
+      "label": "Hour 3",
+      "start": "10:50",
+      "end": "11:40"
+    },
+    {
+      "period": 4,
+      "label": "Hour 4",
+      "start": "11:40",
+      "end": "12:30"
+    },
+    {
+      "period": 5,
+      "label": "Hour 5",
+      "start": "1:20",
+      "end": "2:15"
+    },
+    {
+      "period": 6,
+      "label": "Hour 6",
+      "start": "2:15",
+      "end": "3:10"
+    },
+    {
+      "period": 7,
+      "label": "Hour 7",
+      "start": "3:20",
+      "end": "4:15"
+    }
   ],
-  "breaks": [{"after_period": 2, "start": "10:35", "end": "10:50"}, {"after_period": 6, "start": "15:10", "end": "15:20"}],
-  "lunch": {"start": "12:30", "end": "13:20"},
+  "breaks": [
+    {
+      "after_period": 2,
+      "start": "10:35",
+      "end": "10:50"
+    },
+    {
+      "after_period": 6,
+      "start": "15:10",
+      "end": "15:20"
+    }
+  ],
+  "lunch": {
+    "start": "12:30",
+    "end": "13:20"
+  },
   "schedule": {
     "MON": [
-      {"period":1,"subject":"CN","staff":["TN"],"display":"CN (TN)"},
-      {"period":2,"subject":"OE-I","staff":["MS"],"display":"OE-I (MS)","options":["22BMO01 - Biometric Systems and their Applications (MS/BME)","22GEO01 - NCC Studies - I (BD/ECE)"]},
-      {"period":3,"subject":"PE-I","staff":["ES","TK"],"display":"PE-I (ES, TK)","options":["22ITE22 - Service Oriented Architecture (ES)","22ITE61 - Knowledge Engineering (TK)"]},
-      {"period":4,"subject":"FLAT","staff":["KB"],"display":"FLAT (KB)"},
-      {"period":5,"subject":"ALR","staff":["CK"],"display":"ALR (CK)"},
-      {"period":6,"subject":"ALR","staff":["CK"],"display":"ALR (CK)"},
-      {"period":7,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"}
+      {
+        "period": 1,
+        "subject": "FLAT",
+        "staff": [
+          "KB"
+        ],
+        "display": "FLAT (KB)"
+      },
+      {
+        "period": 2,
+        "subject": "PE-I",
+        "staff": [
+          "ES",
+          "TK"
+        ],
+        "display": "PE-I (ES, TK)"
+      },
+      {
+        "period": 3,
+        "subject": "FSWD",
+        "staff": [
+          "DS"
+        ],
+        "display": "FSWD (DS)"
+      },
+      {
+        "period": 4,
+        "subject": "OE-I",
+        "staff": [
+          "SR"
+        ],
+        "display": "OE-I (SR)"
+      },
+      {
+        "period": 5,
+        "subject": "TC",
+        "staff": [
+          "PM"
+        ],
+        "display": "TC (PM)"
+      },
+      {
+        "period": 6,
+        "subject": "TC",
+        "staff": [
+          "CS"
+        ],
+        "display": "TC (CS)"
+      },
+      {
+        "period": 7,
+        "subject": "PE-II",
+        "staff": [
+          "SM",
+          "VG"
+        ],
+        "display": "PE-II (SM, VG)"
+      }
     ],
     "TUE": [
-      {"period":1,"subject":"FLAT","staff":["KB"],"display":"FLAT (KB)"},
-      {"period":2,"subject":"PE-II","staff":["SM","VG"],"display":"PE-II (SM, VG)","options":["22ITE24 - UI and UX Design (SM)","22ITE62 - Soft Computing (VG)"]},
-      {"period":3,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"},
-      {"period":4,"subject":"OE-I","staff":["MS"],"display":"OE-I (MS)"},
-      {"period":5,"subject":"CN LAB","staff":["TN","SM","MK"],"display":"CN LAB (TN, SM, MK)","is_lab":true},
-      {"period":6,"subject":"CN LAB","staff":["TN","SM","MK"],"display":"CN LAB (TN, SM, MK)","is_lab":true},
-      {"period":7,"subject":"CN LAB","staff":["TN","SM","MK"],"display":"CN LAB (TN, SM, MK)","is_lab":true}
+      {
+        "period": 1,
+        "subject": "FSWD",
+        "staff": [
+          "DS"
+        ],
+        "display": "FSWD (DS)"
+      },
+      {
+        "period": 2,
+        "subject": "CN",
+        "staff": [
+          "MK"
+        ],
+        "display": "CN (MK)"
+      },
+      {
+        "period": 3,
+        "subject": "FLAT",
+        "staff": [
+          "KB"
+        ],
+        "display": "FLAT (KB)"
+      },
+      {
+        "period": 4,
+        "subject": "FSWD",
+        "staff": [
+          "DS"
+        ],
+        "display": "FSWD (DS)"
+      },
+      {
+        "period": 5,
+        "subject": "OE-I",
+        "staff": [
+          "SR"
+        ],
+        "display": "OE-I (SR)"
+      },
+      {
+        "period": 6,
+        "subject": "PE-II",
+        "staff": [
+          "SM",
+          "VG"
+        ],
+        "display": "PE-II (SM, VG)"
+      },
+      {
+        "period": 7,
+        "subject": "FLAT^T",
+        "staff": [
+          "KB",
+          "VL"
+        ],
+        "display": "FLAT^T (KB, VL)"
+      }
     ],
     "WED": [
-      {"period":1,"subject":"FSWD LAB","staff":["RM","PM","MR"],"display":"FSWD LAB (RM, PM, MR)","is_lab":true},
-      {"period":2,"subject":"FSWD LAB","staff":["RM","PM","MR"],"display":"FSWD LAB (RM, PM, MR)","is_lab":true},
-      {"period":3,"subject":"FSWD LAB","staff":["RM","PM","MR"],"display":"FSWD LAB (RM, PM, MR)","is_lab":true},
-      {"period":4,"subject":"CN","staff":["TN"],"display":"CN (TN)"},
-      {"period":5,"subject":"JT","staff":["KN"],"display":"JT (KN)"},
-      {"period":6,"subject":"JT","staff":["KN"],"display":"JT (KN)"},
-      {"period":7,"subject":"FLAT/TC","staff":["KB","RMW"],"display":"FLAT/TC (KB, RMW)","options":["FLAT (KB)","TC (RMW)"]}
+      {
+        "period": 1,
+        "subject": "PE-I",
+        "staff": [
+          "ES",
+          "TK"
+        ],
+        "display": "PE-I (ES, TK)"
+      },
+      {
+        "period": 2,
+        "subject": "CN LAB",
+        "staff": [
+          "MK",
+          "CS",
+          "AL"
+        ],
+        "display": "CN LAB (MK, CS, AL)",
+        "is_lab": true
+      },
+      {
+        "period": 3,
+        "subject": "CN LAB",
+        "staff": [
+          "MK",
+          "CS",
+          "AL"
+        ],
+        "display": "CN LAB (MK, CS, AL)",
+        "is_lab": true
+      },
+      {
+        "period": 4,
+        "subject": "CN LAB",
+        "staff": [
+          "MK",
+          "CS",
+          "AL"
+        ],
+        "display": "CN LAB (MK, CS, AL)",
+        "is_lab": true
+      },
+      {
+        "period": 5,
+        "subject": "FLAT",
+        "staff": [
+          "KB"
+        ],
+        "display": "FLAT (KB)"
+      },
+      {
+        "period": 6,
+        "subject": "FSWD",
+        "staff": [
+          "DS"
+        ],
+        "display": "FSWD (DS)"
+      },
+      {
+        "period": 7,
+        "subject": "CN",
+        "staff": [
+          "MK"
+        ],
+        "display": "CN (MK)"
+      }
     ],
     "THU": [
-      {"period":1,"subject":"PE-I","staff":["ES","TK"],"display":"PE-I (ES, TK)"},
-      {"period":2,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"},
-      {"period":3,"subject":"PE-II","staff":["SM","VG"],"display":"PE-II (SM, VG)"},
-      {"period":4,"subject":"CN","staff":["TN"],"display":"CN (TN)"},
-      {"period":5,"subject":"FLAT","staff":["KB"],"display":"FLAT (KB)"},
-      {"period":6,"subject":"TC","staff":["MV","RMY"],"display":"TC (MV / RMY)","options":["TC (MV)","TC (RMY)"]},
-      {"period":7,"subject":"OE-I","staff":["MS"],"display":"OE-I (MS)"}
+      {
+        "period": 1,
+        "subject": "PE-II",
+        "staff": [
+          "SM",
+          "VG"
+        ],
+        "display": "PE-II (SM, VG)"
+      },
+      {
+        "period": 2,
+        "subject": "FLAT",
+        "staff": [
+          "KB"
+        ],
+        "display": "FLAT (KB)"
+      },
+      {
+        "period": 3,
+        "subject": "JT",
+        "staff": [
+          "KN"
+        ],
+        "display": "JT (KN)"
+      },
+      {
+        "period": 4,
+        "subject": "JT",
+        "staff": [
+          "KN"
+        ],
+        "display": "JT (KN)"
+      },
+      {
+        "period": 5,
+        "subject": "FSWD",
+        "staff": [
+          "DS"
+        ],
+        "display": "FSWD (DS)"
+      },
+      {
+        "period": 6,
+        "subject": "OE-I",
+        "staff": [
+          "SR"
+        ],
+        "display": "OE-I (SR)"
+      },
+      {
+        "period": 7,
+        "subject": "TC",
+        "staff": [
+          "KR"
+        ],
+        "display": "TC (KR)"
+      }
     ],
     "FRI": [
-      {"period":1,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"},
-      {"period":2,"subject":"CN","staff":["TN"],"display":"CN (TN)"},
-      {"period":3,"subject":"OE-I","staff":["MS"],"display":"OE-I (MS)"},
-      {"period":4,"subject":"PE-II","staff":["SM","VG"],"display":"PE-II (SM, VG)"},
-      {"period":5,"subject":"FLAT","staff":["KB"],"display":"FLAT (KB)"},
-      {"period":6,"subject":"PE-I","staff":["ES","TK"],"display":"PE-I (ES, TK)"},
-      {"period":7,"subject":"FSWD","staff":["RM"],"display":"FSWD (RM)"}
+      {
+        "period": 1,
+        "subject": "ALR",
+        "staff": [
+          "SR"
+        ],
+        "display": "ALR (SR)"
+      },
+      {
+        "period": 2,
+        "subject": "ALR",
+        "staff": [
+          "SR"
+        ],
+        "display": "ALR (SR)"
+      },
+      {
+        "period": 3,
+        "subject": "CN",
+        "staff": [
+          "MK"
+        ],
+        "display": "CN (MK)"
+      },
+      {
+        "period": 4,
+        "subject": "PE-I",
+        "staff": [
+          "ES",
+          "TK"
+        ],
+        "display": "PE-I (ES, TK)"
+      },
+      {
+        "period": 5,
+        "subject": "FSWD LAB",
+        "staff": [
+          "DS",
+          "VG",
+          "VL"
+        ],
+        "display": "FSWD LAB (DS, VG, VL)",
+        "is_lab": true
+      },
+      {
+        "period": 6,
+        "subject": "FSWD LAB",
+        "staff": [
+          "DS",
+          "VG",
+          "VL"
+        ],
+        "display": "FSWD LAB (DS, VG, VL)",
+        "is_lab": true
+      },
+      {
+        "period": 7,
+        "subject": "FSWD LAB",
+        "staff": [
+          "DS",
+          "VG",
+          "VL"
+        ],
+        "display": "FSWD LAB (DS, VG, VL)",
+        "is_lab": true
+      }
     ],
     "SAT": [
-      {"period":1,"subject":"OE-I","staff":["MS"],"display":"OE-I (MS)"},
-      {"period":2,"subject":"PE-I","staff":["ES","TK"],"display":"PE-I (ES, TK)"},
-      {"period":3,"subject":"H1/TC","staff":["RMY","ES"],"display":"H1/TC (RMY / ES)","options":["H1 (RMY)","TC (ES)"]},
-      {"period":4,"subject":"PE-II","staff":["SM","VG"],"display":"PE-II (SM, VG)"},
-      {"period":5,"subject":"COUN","staff":["KB","TN","KG"],"display":"COUN (KB, TN, KG)"},
-      {"period":6,"subject":"H2/TC","staff":["KB","TK"],"display":"H2/TC (KB / TK)","options":["H2 (KB)","TC (TK)"]},
-      {"period":7,"subject":"TC","staff":["MV"],"display":"TC (MV)"}
-    ]
+      {
+        "period": 1,
+        "subject": "CN",
+        "staff": [
+          "MK"
+        ],
+        "display": "CN (MK)"
+      },
+      {
+        "period": 2,
+        "subject": "H1 / TC",
+        "staff": [
+          "RD"
+        ],
+        "display": "H1 / TC (RD)"
+      },
+      {
+        "period": 3,
+        "subject": "PE-II",
+        "staff": [
+          "SM",
+          "VG"
+        ],
+        "display": "PE-II (SM, VG)"
+      },
+      {
+        "period": 4,
+        "subject": "H2 / TC",
+        "staff": [
+          "KM"
+        ],
+        "display": "H2 / TC (KM)"
+      },
+      {
+        "period": 5,
+        "subject": "PE-I",
+        "staff": [
+          "ES",
+          "TK"
+        ],
+        "display": "PE-I (ES, TK)"
+      },
+      {
+        "period": 6,
+        "subject": "OE-I",
+        "staff": [
+          "SR"
+        ],
+        "display": "OE-I (SR)"
+      },
+      {
+        "period": 7,
+        "subject": "COUN",
+        "staff": [
+          "KB",
+          "RM",
+          "DS"
+        ],
+        "display": "COUN (KB, RM, DS)"
+      }
+    ],
+    "SUN": []
   },
   "staff_directory": {
-    "RM":"Dr. R. Menaka","TN":"Ms. T. Nithya","KB":"Ms. K. Baby","ES":"Ms. E. Sudha","TK":"Mr. T. Kokilavani","SM":"Ms. S. Mekala","VG":"Ms. V. Gomathi","MS":"Mr. M. Sharmila","BD":"Mr. B. Dinesh Kumar","CK":"Ms. C. Kanimozhi","RMY":"Dr. R. Mynavathi","KN":"Ms. K. Nevedha","PM":"Ms. P. Malar","MR":"Ms. M. Ramya","MK":"Dr. M. Kavitha","MV":"Ms. M. Vimala","RMW":"Ms. R. Maheshwari","TS":"Ms. T. Saranya","KG":"Dr. K. Ganesh Kumar"
+    "DS": "D.Suganya",
+    "MK": "M. Kavitha",
+    "KB": "K.Baby",
+    "ES": "E.Sudha",
+    "TK": "T.Kokilavani",
+    "SM": "S.Mekala",
+    "VG": "V. Gomathi",
+    "SRSB": "S.Ramyashri (SR)/BME",
+    "SRS": "S.Ravichandran (SR)",
+    "RMY": "R.Mynavathi",
+    "VL": "V.Leela",
+    "CS": "C.Saravanan",
+    "AL": "A.Logeswaran",
+    "KNK": "K.Nevedha (KN)",
+    "PM": "P.Malar",
+    "KV": "K.Vanitha",
+    "MV": "M.Vimala",
+    "RM": "R.Menaka",
+    "SR": "SR",
+    "KN": "KN",
+    "KR": "KV/RMY",
+    "RD": "RMY / DS",
+    "KM": "KB / MV"
   }
 }
-

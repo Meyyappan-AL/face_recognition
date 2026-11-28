@@ -1,0 +1,462 @@
+{
+  "breaks": [
+    {
+      "after_period": 2,
+      "end": "10:50",
+      "start": "10:35"
+    },
+    {
+      "after_period": 6,
+      "end": "15:20",
+      "start": "15:10"
+    }
+  ],
+  "class": "23IT7A",
+  "class_advisor": {
+    "initials": "MR",
+    "is_hod": false,
+    "name": "Ms.M.Ramya"
+  },
+  "hall": "103",
+  "lunch": {
+    "end": "13:20",
+    "start": "12:30"
+  },
+  "schedule": {
+    "FRI": [
+      {
+        "period": 1,
+        "subject": "HVPE",
+        "staff": [
+          "MK"
+        ],
+        "display": "HVPE (MK)"
+      },
+      {
+        "period": 2,
+        "subject": "OE-III",
+        "staff": [
+          "PP"
+        ],
+        "display": "OE-III (PP)"
+      },
+      {
+        "period": 3,
+        "subject": "PE-V / TC",
+        "staff": [
+          "DS",
+          "PM2"
+        ],
+        "display": "PE-V / TC (DS, PM2)"
+      },
+      {
+        "period": 4,
+        "subject": "DPT",
+        "staff": [
+          "AL"
+        ],
+        "display": "DPT (AL)"
+      },
+      {
+        "period": 5,
+        "subject": "NS",
+        "staff": [
+          "RM"
+        ],
+        "display": "NS (RM)"
+      },
+      {
+        "period": 6,
+        "subject": "DPT",
+        "staff": [
+          "AL"
+        ],
+        "display": "DPT (AL)"
+      },
+      {
+        "period": 7,
+        "subject": "DPT",
+        "staff": [
+          "AL"
+        ],
+        "display": "DPT (AL)"
+      }
+    ],
+    "MON": [
+      {
+        "period": 1,
+        "subject": "PE-V / TC",
+        "staff": [
+          "DS",
+          "PS"
+        ],
+        "display": "PE-V / TC (DS, PS)"
+      },
+      {
+        "period": 2,
+        "subject": "IPD",
+        "staff": [
+          "KV"
+        ],
+        "display": "IPD (KV)"
+      },
+      {
+        "period": 3,
+        "subject": "NS",
+        "staff": [
+          "RM"
+        ],
+        "display": "NS (RM)"
+      },
+      {
+        "period": 4,
+        "subject": "IPD",
+        "staff": [
+          "MR"
+        ],
+        "display": "IPD (MR)"
+      },
+      {
+        "period": 5,
+        "subject": "ICTK",
+        "staff": [
+          "DS"
+        ],
+        "display": "ICTK (DS)"
+      },
+      {
+        "period": 6,
+        "subject": "PE-VI / TC",
+        "staff": [
+          "RMY",
+          "K"
+        ],
+        "display": "PE-VI / TC (RMY, K)"
+      },
+      {
+        "period": 7,
+        "subject": "EME",
+        "staff": [
+          "AL"
+        ],
+        "display": "EME (AL)"
+      }
+    ],
+    "SAT": [
+      {
+        "period": 1,
+        "subject": "EME",
+        "staff": [
+          "AL"
+        ],
+        "display": "EME (AL)"
+      },
+      {
+        "period": 2,
+        "subject": "NS",
+        "staff": [
+          "RM"
+        ],
+        "display": "NS (RM)"
+      },
+      {
+        "period": 3,
+        "subject": "PE-VI / TC",
+        "staff": [
+          "RMY",
+          "C"
+        ],
+        "display": "PE-VI / TC (RMY, C)"
+      },
+      {
+        "period": 4,
+        "subject": "PE-V / TC",
+        "staff": [
+          "DS",
+          "PE"
+        ],
+        "display": "PE-V / TC (DS, PE)"
+      },
+      {
+        "period": 5,
+        "subject": "OE-III",
+        "staff": [
+          "PP"
+        ],
+        "display": "OE-III (PP)"
+      },
+      {
+        "period": 6,
+        "subject": "H5 / TC",
+        "staff": [
+          "AS"
+        ],
+        "display": "H5 / TC (AS)"
+      },
+      {
+        "period": 7,
+        "subject": "H6 / TC",
+        "staff": [
+          "PE2"
+        ],
+        "display": "H6 / TC (PE2)"
+      }
+    ],
+    "SUN": [],
+    "THU": [
+      {
+        "period": 1,
+        "subject": "DPT",
+        "staff": [
+          "AL"
+        ],
+        "display": "DPT (AL)"
+      },
+      {
+        "period": 2,
+        "subject": "PE-V / TC",
+        "staff": [
+          "DS",
+          "PT"
+        ],
+        "display": "PE-V / TC (DS, PT)"
+      },
+      {
+        "period": 3,
+        "subject": "EME",
+        "staff": [
+          "AL"
+        ],
+        "display": "EME (AL)"
+      },
+      {
+        "period": 4,
+        "subject": "PE-VI / TC",
+        "staff": [
+          "RMY",
+          "E"
+        ],
+        "display": "PE-VI / TC (RMY, E)"
+      },
+      {
+        "period": 5,
+        "subject": "IPD",
+        "staff": [
+          "PM"
+        ],
+        "display": "IPD (PM)"
+      },
+      {
+        "period": 6,
+        "subject": "IPD",
+        "staff": [
+          "AL"
+        ],
+        "display": "IPD (AL)"
+      },
+      {
+        "period": 7,
+        "subject": "ICTK",
+        "staff": [
+          "DS"
+        ],
+        "display": "ICTK (DS)"
+      }
+    ],
+    "TUE": [
+      {
+        "period": 1,
+        "subject": "OE-III",
+        "staff": [
+          "PP"
+        ],
+        "display": "OE-III (PP)"
+      },
+      {
+        "period": 2,
+        "subject": "DPT",
+        "staff": [
+          "AL"
+        ],
+        "display": "DPT (AL)"
+      },
+      {
+        "period": 3,
+        "subject": "DPT",
+        "staff": [
+          "AR"
+        ],
+        "display": "DPT (AR)"
+      },
+      {
+        "period": 4,
+        "subject": "HVPE",
+        "staff": [
+          "MK"
+        ],
+        "display": "HVPE (MK)"
+      },
+      {
+        "period": 5,
+        "subject": "NS LAB",
+        "staff": [
+          "AL",
+          "ES"
+        ],
+        "display": "NS LAB (AL, ES)"
+      },
+      {
+        "period": 6,
+        "subject": "NS LAB",
+        "staff": [
+          "AL",
+          "ES"
+        ],
+        "display": "NS LAB (AL, ES)"
+      },
+      {
+        "period": 7,
+        "subject": "NS LAB",
+        "staff": [
+          "AL",
+          "ES"
+        ],
+        "display": "NS LAB (AL, ES)"
+      }
+    ],
+    "WED": [
+      {
+        "period": 1,
+        "subject": "NS",
+        "staff": [
+          "RM"
+        ],
+        "display": "NS (RM)"
+      },
+      {
+        "period": 2,
+        "subject": "PE-VI / TC",
+        "staff": [
+          "RMY",
+          "V"
+        ],
+        "display": "PE-VI / TC (RMY, V)"
+      },
+      {
+        "period": 3,
+        "subject": "IPD",
+        "staff": [
+          "TK"
+        ],
+        "display": "IPD (TK)"
+      },
+      {
+        "period": 4,
+        "subject": "COUN",
+        "staff": [
+          "MR",
+          "VG"
+        ],
+        "display": "COUN (MR, VG)"
+      },
+      {
+        "period": 5,
+        "subject": "EME",
+        "staff": [
+          "AL"
+        ],
+        "display": "EME (AL)"
+      },
+      {
+        "period": 6,
+        "subject": "NS",
+        "staff": [
+          "RM"
+        ],
+        "display": "NS (RM)"
+      },
+      {
+        "period": 7,
+        "subject": "OE-III",
+        "staff": [
+          "PP"
+        ],
+        "display": "OE-III (PP)"
+      }
+    ]
+  },
+  "slots": [
+    {
+      "period": 1,
+      "label": "Hour 1",
+      "start": "09:00",
+      "end": "09:45"
+    },
+    {
+      "period": 2,
+      "label": "Hour 2",
+      "start": "09:45",
+      "end": "10:35"
+    },
+    {
+      "period": 3,
+      "label": "Hour 3",
+      "start": "10:50",
+      "end": "11:40"
+    },
+    {
+      "period": 4,
+      "label": "Hour 4",
+      "start": "11:40",
+      "end": "12:30"
+    },
+    {
+      "period": 5,
+      "label": "Hour 5",
+      "start": "01:20",
+      "end": "02:15"
+    },
+    {
+      "period": 6,
+      "label": "Hour 6",
+      "start": "02:15",
+      "end": "03:10"
+    },
+    {
+      "period": 7,
+      "label": "Hour 7",
+      "start": "03:20",
+      "end": "04:15"
+    }
+  ],
+  "staff_directory": {
+    "AL": "A.Logeswaran",
+    "AR": "AL / RMY",
+    "AS": "AL / SM",
+    "BDKB": "B.Dinesh Kumar (BD) / ECE",
+    "C": "/ CS",
+    "CS": "C.Saravanan",
+    "DS": "D.Suganya",
+    "E": "/ ES",
+    "ES": "E.Sudha",
+    "K": "/ KV",
+    "KV": "K.Vanitha",
+    "MK": "M. Kavitha",
+    "MR": "M.Ramya",
+    "PE": "PM / ES",
+    "PE2": "PPR / ES",
+    "PM": "P.Malar",
+    "PM2": "PM / MR",
+    "PP": "PP",
+    "PPPM": "P.Praveen (PP) / MECH",
+    "PPR": "P.Prakash",
+    "PS": "PM / SM",
+    "PT": "PM / TK",
+    "RM": "R.Menaka",
+    "RMY": "R.Mynavathi",
+    "SM": "S.Mekala",
+    "TK": "T.Kokilavani",
+    "V": "/VG",
+    "VG": "V.Gomathi"
+  }
+}
