@@ -467,6 +467,7 @@
     state.data=emptyTimetable(cls); state.referencePath=''; state.referenceName=''; state.referenceUrl=''; state.notes=''; state.dirty=false;
     $('classSelect').value=cls; $('importResult').textContent=''; clearLists(); renderHistory(); renderEditor();
     msg('Loading '+cls+' (batch '+state.batch+', sem '+state.semNo+')...');
+    const url=new URL(window.location.href); url.searchParams.set('class',cls); if(state.batch) url.searchParams.set('batch_start_year',state.batch); if(state.semNo) url.searchParams.set('sem_no',state.semNo); history.replaceState({},'',url);
     try{
       await loadVersions(cls,state.batch,state.semNo);
       if(seq!==state.loadSeq || state.class!==cls) return;
@@ -696,9 +697,16 @@
     classList=Array.from(new Set((classes||[]).filter(Boolean)));
     $('classChips').innerHTML=classList.length?classList.map(c=>`<span class="tt-chip">${esc(c)}</span>`).join(''):'<span class="text-muted">No classes yet.</span>';
     populateClasses();
-    if(classList.length){
-      state.class=classList[0]; $('classSelect').value=classList[0]; setDirty(false);
-      await loadClass(classList[0]);
+    const params=new URLSearchParams(window.location.search||'');
+    const qClass=(params.get('class')||'').toUpperCase().trim();
+    const qBatch=params.get('batch_start_year')||''; const qSem=params.get('sem_no')||'';
+    let initial=classList.includes(qClass)?qClass:(classList[0]||'');
+    if(initial){
+      syncBatchSemFromClass(initial);
+      if(qBatch) $('batchSelect').value=qBatch;
+      if(qSem) $('semSelect').value=qSem;
+      state.class=initial; $('classSelect').value=initial; setDirty(false);
+      await loadClass(initial);
     } else {
       msg('No classes found. Use New Class to create one.','warning');
       $('dirtyState').innerHTML='<span class="badge bg-warning text-dark">No classes</span>';
