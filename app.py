@@ -1984,6 +1984,8 @@ def api_admin_timetable_import_apply():
     cls=canonical_class_name(data.get('class') or '')
     sem, _by=_resolve_batch_sem_from_request(data=data)
     sem_id=int(sem['id']) if sem else None
+    allowed, reason=_sem_edit_allowed(sem)
+    if not allowed: return jsonify({'ok':False,'error':reason}), 403
     effective_from=(data.get('effective_from') or _today_ist_str()).strip()
     preview=_parse_timetable_import(text, cls, sem_id)
     if not preview.get('ok'):
@@ -2008,6 +2010,8 @@ def api_admin_timetable_version_create():
     if not is_valid_class_name(cls): return jsonify({'ok':False,'error':'Invalid class name. Use YYIT<sem><section>.'}), 400
     sem, _by=_resolve_batch_sem_from_request(data=data)
     sem_id=int(sem['id']) if sem and sem.get('id') else None
+    allowed, reason=_sem_edit_allowed(sem)
+    if not allowed: return jsonify({'ok':False,'error':reason}), 403
     effective_from=(data.get('effective_from') or _today_ist_str()).strip()
     payload=data.get('data') if isinstance(data.get('data'),dict) else data.get('timetable')
     if not isinstance(payload,dict):
@@ -2059,6 +2063,9 @@ def api_admin_timetable_version_restore(version_id):
     sem,_by=_resolve_batch_sem_from_request(data=data)
     if sem and sem.get('id'):
         sem_id=int(sem['id'])
+    sem_obj=_semester_by_id(sem_id) if sem_id else sem
+    allowed, reason=_sem_edit_allowed(sem_obj)
+    if not allowed: return jsonify({'ok':False,'error':reason}), 403
     notes=((data.get('notes') or '').strip() or f'Restored from version {version_no}').strip()
     res=_save_timetable_version(cls,sem_id,eff,payload,reference_path=(ref_path or ''),
                                 reference_name=(ref_name or ''),notes=notes)
