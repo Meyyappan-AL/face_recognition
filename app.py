@@ -1953,6 +1953,25 @@ def api_admin_timetable_versions():
     sem, by=_resolve_batch_sem_from_request()
     sem_id=int(sem['id']) if sem and sem.get('id') else None
     rows=_timetable_version_rows(cls or None,sem_id,include_hidden=True)
+    if cls and sem_id is not None and not rows:
+        info=parse_cohort_class(cls)
+        try:
+            conn=_db(); c=conn.cursor()
+            if info and info.get('batch_start_year')==by and int(info.get('sem_no') or 0)==int((sem or {}).get('sem_no') or 0):
+                c.execute("UPDATE timetable_versions SET semester_id=? WHERE upper(class_name)=upper(?) AND (semester_id IS NULL OR semester_id<>?)", (sem_id, cls, sem_id))
+            else:
+                c.execute("SELECT id,semester_id,effective_from FROM timetable_versions WHERE upper(class_name)=upper(?)", (cls,))
+                for vid, old_sid, eff in c.fetchall():
+                    old=_semester_by_id(old_sid) if old_sid else None
+                    target_sem_no=int((sem or {}).get('sem_no') or 0) or int(current_sem_for_batch(by,on_date=eff or _today_ist_str()))
+                    target=get_or_create_batch_semester(by,target_sem_no,actor='timetable_repair')
+                    if target and target.get('id') and int(target['id'])!=int(old_sid or 0) and (not old or old.get('batch_start_year')!=by):
+                        c.execute("UPDATE timetable_versions SET semester_id=? WHERE id=?", (int(target['id']), vid))
+            conn.commit(); conn.close()
+        except Exception:
+            try: conn.close()
+            except Exception: pass
+        rows=_timetable_version_rows(cls or None,sem_id,include_hidden=True)
     versions=[_timetable_version_json(r) for r in rows]
     return jsonify({'ok':True,'class':cls,'batch_start_year':by,'semester_id':sem_id,'sem_no':(sem or {}).get('sem_no'),'versions':versions})
 
