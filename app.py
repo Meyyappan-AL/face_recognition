@@ -2695,7 +2695,12 @@ def api_admin_electives_carry_forward():
 def api_admin_electives_export():
     cls=(request.args.get('class') or '').strip()
     if not cls or cls not in get_classes(): abort(400)
-    version=_resolve_elective_version(cls,request.args.get('version_id'),request.args.get('semester_id'))
+    sem_no=request.args.get('sem_no'); by=request.args.get('batch_start_year')
+    sem_id=request.args.get('semester_id')
+    if sem_id in (None,'') and sem_no not in (None,'') and by not in (None,''):
+        try: sem=_batch_semester_row(int(by),int(sem_no)); sem_id=sem.get('id') if sem else None
+        except Exception: pass
+    version=_resolve_elective_version(cls,request.args.get('version_id'),sem_id)
     vid=int(version['id']) if version else None
     conn=_db(); c=conn.cursor()
     c.execute('SELECT id,name,reg_no,roll,class FROM students WHERE upper(class)=upper(?) ORDER BY name COLLATE NOCASE',(cls,))
@@ -2714,7 +2719,12 @@ def api_admin_electives_export():
 def api_admin_electives_import():
     cls=_norm(request.form.get('class_name') or request.form.get('class'))
     if not cls or cls not in get_classes(): return jsonify({'ok':False,'error':'Valid class required.'}), 400
-    version=_resolve_elective_version(cls,request.form.get('version_id'),request.form.get('semester_id'))
+    sem_no=request.form.get('sem_no'); by=request.form.get('batch_start_year')
+    sem_id=request.form.get('semester_id')
+    if sem_id in (None,'') and sem_no not in (None,'') and by not in (None,''):
+        try: sem=_batch_semester_row(int(by),int(sem_no)); sem_id=sem.get('id') if sem else None
+        except Exception: pass
+    version=_resolve_elective_version(cls,request.form.get('version_id'),sem_id)
     if not version: return jsonify({'ok':False,'error':'Create/select a timetable version before importing electives.'}), 400
     vid=int(version['id'])
     f=request.files.get('file')
@@ -7129,9 +7139,17 @@ def api_analytics_overview():
     compliance=[{'date':r[0],'class':r[1],'submitted_periods':r[2]} for r in c.fetchall()]
     conn.close()
     if sem:
-        semester={'id':sem.get('id'),'label':sem.get('label') or 'Semester','start':dfrom or (sem.get('start_date') or ''),'end':dto or (sem.get('end_date') or ''),'is_current':int(sem.get('is_current') or 0)}
+        semester={'id':sem.get('id'),'label':sem.get('label') or 'Semester','start':dfrom or (sem.get('start_date') or ''),'end':dto or (sem.get('end_date') or ''),'is_current':int(sem.get('is_current') or 0),
+                  'sem_no':sem.get('sem_no'),'batch_start_year':sem.get('batch_start_year')}
     else:
-        semester={'id':None,'label':get_setting('semester_label','Current Semester'),'start':dfrom or get_setting('semester_start',''),'end':dto or get_setting('semester_end',''),'is_current':0}
+        info=parse_cohort_class(cls) if cls else None
+        by=info.get('batch_start_year') if info else None
+        if by is not None:
+            cur_no=current_sem_for_batch(by)
+            sem2=_batch_semester_row(by,cur_no)
+            semester=_semester_json(sem2,batch_start_year=by,on_date=_today_ist_str()) if sem2 else {'id':None,'label':f'Sem {cur_no}','start':dfrom or '','end':dto or '','is_current':0}
+        else:
+            semester={'id':None,'label':get_setting('semester_label','Current Semester'),'start':dfrom or get_setting('semester_start',''),'end':dto or get_setting('semester_end',''),'is_current':0}
     return jsonify({'ok':True,'students':students,'defaulters':defaulters,'subjects':subjects,'compliance':compliance,'threshold':threshold,'semester':semester})
 
 def _analytics_status_key(status):
@@ -7282,9 +7300,17 @@ def api_analytics_insights():
     compare_rows.sort(key=lambda x:(x.get('percentage') or 0, x.get('total') or 0, x.get('label') or ''), reverse=True)
     totals=_analytics_finalize(totals)
     if sem:
-        semester={'id':sem.get('id'),'label':sem.get('label') or 'Semester','start':dfrom or (sem.get('start_date') or ''),'end':dto or (sem.get('end_date') or ''),'is_current':int(sem.get('is_current') or 0)}
+        semester={'id':sem.get('id'),'label':sem.get('label') or 'Semester','start':dfrom or (sem.get('start_date') or ''),'end':dto or (sem.get('end_date') or ''),'is_current':int(sem.get('is_current') or 0),
+                  'sem_no':sem.get('sem_no'),'batch_start_year':sem.get('batch_start_year')}
     else:
-        semester={'id':None,'label':get_setting('semester_label','Current Semester'),'start':dfrom or get_setting('semester_start',''),'end':dto or get_setting('semester_end',''),'is_current':0}
+        info=parse_cohort_class(cls) if cls else None
+        by=info.get('batch_start_year') if info else None
+        if by is not None:
+            cur_no=current_sem_for_batch(by)
+            sem2=_batch_semester_row(by,cur_no)
+            semester=_semester_json(sem2,batch_start_year=by,on_date=_today_ist_str()) if sem2 else {'id':None,'label':f'Sem {cur_no}','start':dfrom or '','end':dto or '','is_current':0}
+        else:
+            semester={'id':None,'label':get_setting('semester_label','Current Semester'),'start':dfrom or get_setting('semester_start',''),'end':dto or get_setting('semester_end',''),'is_current':0}
     return jsonify({'ok':True,'students':students,'defaulters':defaulters,'threshold':threshold,'semester':semester,
                     'range':{'from':dfrom,'to':dto},'scope':'all' if is_admin else 'staff_handled',
                     'filters':{'absence':absence,'compare':mode,'class':cls},
